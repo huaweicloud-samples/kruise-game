@@ -1,14 +1,54 @@
 package options
 
 type HwCloudOptions struct {
-	Enable        bool          `toml:"enable"`
-	ELBOptions    ELBOptions    `toml:"elb"`
-	CCEELBOptions CCEELBOptions `toml:"cce"`
+	Enable             bool               `toml:"enable"`
+	ELBOptions         ELBOptions         `toml:"elb"`
+	CCEELBOptions      CCEELBOptions      `toml:"cce-elb"`
+	CCEMultiELBOptions CCEMultiELBOptions `toml:"cce-multi-elb"`
 }
 
 type CCEELBOptions struct {
-	ELBOptions      ELBOptions `toml:"elb"`
-	MultiELBOptions ELBOptions `toml:"multi-elb"`
+	MaxPort    int32   `toml:"max_port"`
+	MinPort    int32   `toml:"min_port"`
+	BlockPorts []int32 `toml:"block_ports"`
+}
+
+func (e CCEELBOptions) valid(skipPortRangeCheck bool) bool {
+	for _, blockPort := range e.BlockPorts {
+		if blockPort >= e.MaxPort || blockPort <= e.MinPort {
+			return false
+		}
+	}
+	// old elb plugin only allow 200 ports.
+	if !skipPortRangeCheck && int(e.MaxPort-e.MinPort)-len(e.BlockPorts) > 200 {
+		return false
+	}
+	if !skipPortRangeCheck && (e.MinPort <= 0 || e.MaxPort > 65535) {
+		return false
+	}
+	return true
+}
+
+type CCEMultiELBOptions struct {
+	MaxPort    int32   `toml:"max_port"`
+	MinPort    int32   `toml:"min_port"`
+	BlockPorts []int32 `toml:"block_ports"`
+}
+
+func (e CCEMultiELBOptions) valid(skipPortRangeCheck bool) bool {
+	for _, blockPort := range e.BlockPorts {
+		if blockPort >= e.MaxPort || blockPort <= e.MinPort {
+			return false
+		}
+	}
+	// old elb plugin only allow 200 ports.
+	if !skipPortRangeCheck && int(e.MaxPort-e.MinPort)-len(e.BlockPorts) > 200 {
+		return false
+	}
+	if !skipPortRangeCheck && (e.MinPort <= 0 || e.MaxPort > 65535) {
+		return false
+	}
+	return true
 }
 
 type ELBOptions struct {
@@ -24,10 +64,10 @@ func (e ELBOptions) valid(skipPortRangeCheck bool) bool {
 		}
 	}
 	// old elb plugin only allow 200 ports.
-	//if !skipPortRangeCheck && int(e.MaxPort-e.MinPort)-len(e.BlockPorts) > 200 {
-	//	return false
-	//}
-	if e.MinPort <= 0 || e.MaxPort > 65535 {
+	if !skipPortRangeCheck && int(e.MaxPort-e.MinPort)-len(e.BlockPorts) > 200 {
+		return false
+	}
+	if !skipPortRangeCheck && (e.MinPort <= 0 || e.MaxPort > 65535) {
 		return false
 	}
 	return true
@@ -36,7 +76,8 @@ func (e ELBOptions) valid(skipPortRangeCheck bool) bool {
 func (o HwCloudOptions) Valid() bool {
 	elbOptions := o.ELBOptions
 	cceElbOptions := o.CCEELBOptions
-	return elbOptions.valid(false) && cceElbOptions.ELBOptions.valid(true)
+	cceMltiElbOptions := o.CCEMultiELBOptions
+	return elbOptions.valid(true) || cceElbOptions.valid(false) || cceMltiElbOptions.valid(false)
 }
 
 func (o HwCloudOptions) Enabled() bool {

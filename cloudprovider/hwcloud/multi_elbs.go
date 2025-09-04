@@ -88,7 +88,7 @@ func (m *MultiElbsPlugin) Alias() string {
 func (m *MultiElbsPlugin) Init(c client.Client, options cloudprovider.CloudProviderOptions, ctx context.Context) error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	elbOptions := options.(provideroptions.HwCloudOptions).ELBOptions
+	elbOptions := options.(provideroptions.HwCloudOptions).CCEMultiELBOptions
 	m.minPort = elbOptions.MinPort
 	m.maxPort = elbOptions.MaxPort
 	m.blockPorts = elbOptions.BlockPorts
