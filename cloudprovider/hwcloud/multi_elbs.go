@@ -408,6 +408,7 @@ func init() {
 
 type multiELBsConfig struct {
 	lbNames               map[string]string
+	lbIp                  map[string]string
 	idList                [][]string
 	targetPorts           []int
 	protocols             []corev1.Protocol
@@ -473,6 +474,7 @@ func (m *MultiElbsPlugin) consSvc(podLbsPorts *lbsPorts, conf *multiELBsConfig, 
 	//	}
 	//}
 	svcAnnotations[LBIDBelongIndexKey] = strconv.Itoa(podLbsPorts.index)
+	svcAnnotations[ElbMappingPoolAnnotationKey] = lbName
 
 	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
@@ -494,6 +496,7 @@ func (m *MultiElbsPlugin) consSvc(podLbsPorts *lbsPorts, conf *multiELBsConfig, 
 			},
 			Ports: svcPorts,
 			//LoadBalancerClass: &loadBalancerClass,
+			LoadBalancerIP: conf.lbIp[selectId],
 		},
 	}, nil
 }
@@ -611,6 +614,7 @@ func parsemultiELBsConfig(conf []gamekruiseiov1alpha1.NetworkConfParams) (*multi
 	lbNames := make(map[string]string)
 	idList := make([][]string, 0)
 	nameNums := make(map[string]int)
+	lbIp := make(map[string]string)
 	ports := make([]int, 0)
 	protocols := make([]corev1.Protocol, 0)
 	isFixed := false
@@ -623,12 +627,13 @@ func parsemultiELBsConfig(conf []gamekruiseiov1alpha1.NetworkConfParams) (*multi
 			for _, ElbIdNamesConfig := range strings.Split(c.Value, ",") {
 				if ElbIdNamesConfig != "" {
 					idName := strings.Split(ElbIdNamesConfig, "/")
-					if len(idName) != 2 {
+					if len(idName) != 3 {
 						return nil, fmt.Errorf("invalid ElbIdNames %s. You should input as the format {elb-id-0}/{name-0}", c.Value)
 					}
 
 					id := idName[0]
 					name := idName[1]
+					ip := idName[2]
 
 					nameNum := nameNums[name]
 					if nameNum >= len(idList) {
@@ -638,6 +643,7 @@ func parsemultiELBsConfig(conf []gamekruiseiov1alpha1.NetworkConfParams) (*multi
 					}
 					nameNums[name]++
 					lbNames[id] = name
+					lbIp[id] = ip
 				}
 			}
 		case PortProtocolsConfigName:
@@ -702,6 +708,7 @@ func parsemultiELBsConfig(conf []gamekruiseiov1alpha1.NetworkConfParams) (*multi
 		isFixed:               isFixed,
 		externalTrafficPolicy: externalTrafficPolicy,
 		allocatePolicy:        allocatePolicy,
+		lbIp:                  lbIp,
 		//elbHealthConfig:       elbHealthConfig,
 	}, nil
 }
