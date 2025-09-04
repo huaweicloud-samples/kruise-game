@@ -23,9 +23,9 @@ func (e ELBOptions) valid(skipPortRangeCheck bool) bool {
 		}
 	}
 	// old elb plugin only allow 200 ports.
-	if !skipPortRangeCheck && int(e.MaxPort-e.MinPort)-len(e.BlockPorts) > 200 {
-		return false
-	}
+	//if !skipPortRangeCheck && int(e.MaxPort-e.MinPort)-len(e.BlockPorts) > 200 {
+	//	return false
+	//}
 	if e.MinPort <= 0 || e.MaxPort > 65535 {
 		return false
 	}
