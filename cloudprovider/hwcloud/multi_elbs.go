@@ -88,7 +88,7 @@ func (m *MultiElbsPlugin) Alias() string {
 func (m *MultiElbsPlugin) Init(c client.Client, options cloudprovider.CloudProviderOptions, ctx context.Context) error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	elbOptions := options.(provideroptions.HwCloudOptions).MultiELBOptions
+	elbOptions := options.(provideroptions.HwCloudOptions).ELBOptions
 	m.minPort = elbOptions.MinPort
 	m.maxPort = elbOptions.MaxPort
 	m.blockPorts = elbOptions.BlockPorts
@@ -611,7 +611,7 @@ func (m *MultiElbsPlugin) deAllocate(nsName string) {
 }
 
 func parsemultiELBsConfig(conf []gamekruiseiov1alpha1.NetworkConfParams) (*multiELBsConfig, error) {
-	// lbNames format {id}: {name}: {ip}
+	// lbNames format {id}: {name}
 	lbNames := make(map[string]string)
 	idList := make([][]string, 0)
 	nameNums := make(map[string]int)
@@ -681,7 +681,7 @@ func parsemultiELBsConfig(conf []gamekruiseiov1alpha1.NetworkConfParams) (*multi
 
 	// check idList
 	if len(idList) == 0 {
-		return nil, fmt.Errorf("invalid ElbIdNames. You should input as the format {elb-id-0}/{name-0}/{ip-0}")
+		return nil, fmt.Errorf("invalid ElbIdNames. You should input as the format {elb-id-0}/{name-0}")
 	}
 	num := len(idList[0])
 	for i := 1; i < len(idList); i++ {
