@@ -7,7 +7,8 @@ type HwCloudOptions struct {
 }
 
 type CCEELBOptions struct {
-	ELBOptions ELBOptions `toml:"elb"`
+	ELBOptions      ELBOptions `toml:"elb"`
+	MultiELBOptions ELBOptions `toml:"multi-elb"`
 }
 
 type ELBOptions struct {
