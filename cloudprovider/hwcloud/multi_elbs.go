@@ -415,6 +415,7 @@ type multiELBsConfig struct {
 	isFixed               bool
 	externalTrafficPolicy corev1.ServiceExternalTrafficPolicyType
 	allocatePolicy        string
+	elbClass              string
 	//*elbHealthConfig
 }
 
@@ -475,7 +476,7 @@ func (m *MultiElbsPlugin) consSvc(podLbsPorts *lbsPorts, conf *multiELBsConfig, 
 	//}
 	svcAnnotations[LBIDBelongIndexKey] = strconv.Itoa(podLbsPorts.index)
 	svcAnnotations[ElbMappingPoolAnnotationKey] = lbName
-	svcAnnotations[ElbClassAnnotationKey] = "performance"
+	svcAnnotations[ElbClassAnnotationKey] = conf.elbClass
 
 	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
@@ -621,6 +622,7 @@ func parsemultiELBsConfig(conf []gamekruiseiov1alpha1.NetworkConfParams) (*multi
 	isFixed := false
 	externalTrafficPolicy := corev1.ServiceExternalTrafficPolicyTypeLocal
 	allocatePolicy := "default"
+	elbClass := "performance"
 
 	for _, c := range conf {
 		switch c.Name {
@@ -676,6 +678,8 @@ func parsemultiELBsConfig(conf []gamekruiseiov1alpha1.NetworkConfParams) (*multi
 			if allocatePolicy != "default" && allocatePolicy != "balanced" {
 				return nil, fmt.Errorf("invalid AllocatePolicy %s", allocatePolicy)
 			}
+		case ElbClassConfigName:
+			elbClass = c.Value
 		}
 	}
 
@@ -710,6 +714,7 @@ func parsemultiELBsConfig(conf []gamekruiseiov1alpha1.NetworkConfParams) (*multi
 		externalTrafficPolicy: externalTrafficPolicy,
 		allocatePolicy:        allocatePolicy,
 		lbIp:                  lbIp,
+		elbClass:              elbClass,
 		//elbHealthConfig:       elbHealthConfig,
 	}, nil
 }
