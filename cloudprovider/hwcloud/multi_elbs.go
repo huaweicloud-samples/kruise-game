@@ -268,10 +268,31 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 		}
 
 		// network not ready
-		if svc.Status.LoadBalancer.Ingress == nil {
+		if svc.Status.LoadBalancer.Ingress == nil || len(svc.Status.LoadBalancer.Ingress) == 0 {
 			networkStatus.CurrentNetworkState = gamekruiseiov1alpha1.NetworkNotReady
 			pod, err = networkManager.UpdateNetworkStatus(*networkStatus, pod)
 			return pod, cperrors.ToPluginError(err, cperrors.InternalError)
+		}
+
+		// Automatically update LoadBalancerIP to the ingress external IP
+		ingressIP := svc.Status.LoadBalancer.Ingress[0].IP
+		if len(svc.Status.LoadBalancer.Ingress) == 2 {
+			ingressIP = svc.Status.LoadBalancer.Ingress[1].IP
+			if ingressIP != "" && svc.Spec.LoadBalancerIP != ingressIP {
+				svc.Spec.LoadBalancerIP = ingressIP
+				err := c.Update(ctx, svc)
+				if err != nil {
+					return pod, cperrors.ToPluginError(err, cperrors.ApiCallError)
+				}
+				// Re-fetch the service to ensure we have the latest version
+				err = c.Get(ctx, types.NamespacedName{
+					Name:      pod.GetName() + "-" + strings.ToLower(lbName),
+					Namespace: pod.GetNamespace(),
+				}, svc)
+				if err != nil {
+					return pod, cperrors.NewPluginError(cperrors.ApiCallError, err.Error())
+				}
+			}
 		}
 		_, readyCondition := util.GetPodConditionFromList(pod.Status.Conditions, corev1.PodReady)
 		if readyCondition == nil || readyCondition.Status == corev1.ConditionFalse {
@@ -318,7 +339,7 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 			}
 			externalAddress := gamekruiseiov1alpha1.NetworkAddress{
 				EndPoint: endPoints,
-				IP:       svc.Status.LoadBalancer.Ingress[0].IP,
+				IP:       ingressIP,
 				Ports: []gamekruiseiov1alpha1.NetworkPort{
 					{
 						Name:     port.Name,
@@ -408,7 +429,6 @@ func init() {
 
 type multiELBsConfig struct {
 	lbNames               map[string]string
-	lbIp                  map[string]string
 	idList                [][]string
 	targetPorts           []int
 	protocols             []corev1.Protocol
@@ -478,6 +498,8 @@ func (m *MultiElbsPlugin) consSvc(podLbsPorts *lbsPorts, conf *multiELBsConfig, 
 	svcAnnotations[ElbMappingPoolAnnotationKey] = lbName
 	svcAnnotations[ElbClassAnnotationKey] = conf.elbClass
 
+	// Create service without LoadBalancerIP initially
+	// It will be set automatically by the cloud provider or in the OnPodUpdated function
 	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        pod.GetName() + "-" + strings.ToLower(lbName),
@@ -498,7 +520,7 @@ func (m *MultiElbsPlugin) consSvc(podLbsPorts *lbsPorts, conf *multiELBsConfig, 
 			},
 			Ports: svcPorts,
 			//LoadBalancerClass: &loadBalancerClass,
-			LoadBalancerIP: conf.lbIp[selectId],
+			// LoadBalancerIP will be automatically set by the cloud provider or in OnPodUpdated
 		},
 	}, nil
 }
@@ -616,7 +638,6 @@ func parsemultiELBsConfig(conf []gamekruiseiov1alpha1.NetworkConfParams) (*multi
 	lbNames := make(map[string]string)
 	idList := make([][]string, 0)
 	nameNums := make(map[string]int)
-	lbIp := make(map[string]string)
 	ports := make([]int, 0)
 	protocols := make([]corev1.Protocol, 0)
 	isFixed := false
@@ -629,14 +650,14 @@ func parsemultiELBsConfig(conf []gamekruiseiov1alpha1.NetworkConfParams) (*multi
 		case ElbIdNamesConfigName:
 			for _, ElbIdNamesConfig := range strings.Split(c.Value, ",") {
 				if ElbIdNamesConfig != "" {
-					idName := strings.Split(ElbIdNamesConfig, "/")
-					if len(idName) != 3 {
+					// Parse format: {elb-id-0}/{name-0}
+					parts := strings.Split(ElbIdNamesConfig, "/")
+					if len(parts) != 2 {
 						return nil, fmt.Errorf("invalid ElbIdNames %s. You should input as the format {elb-id-0}/{name-0}", c.Value)
 					}
 
-					id := idName[0]
-					name := idName[1]
-					ip := idName[2]
+					id := parts[0]
+					name := parts[1]
 
 					nameNum := nameNums[name]
 					if nameNum >= len(idList) {
@@ -646,7 +667,7 @@ func parsemultiELBsConfig(conf []gamekruiseiov1alpha1.NetworkConfParams) (*multi
 					}
 					nameNums[name]++
 					lbNames[id] = name
-					lbIp[id] = ip
+					// IP will be automatically obtained from ingress
 				}
 			}
 		case PortProtocolsConfigName:
@@ -713,7 +734,6 @@ func parsemultiELBsConfig(conf []gamekruiseiov1alpha1.NetworkConfParams) (*multi
 		isFixed:               isFixed,
 		externalTrafficPolicy: externalTrafficPolicy,
 		allocatePolicy:        allocatePolicy,
-		lbIp:                  lbIp,
 		elbClass:              elbClass,
 		//elbHealthConfig:       elbHealthConfig,
 	}, nil
