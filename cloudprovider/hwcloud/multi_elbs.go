@@ -57,6 +57,8 @@ const (
 
 	PrefixReadyReadinessGate = "service.readiness.hwcloud.com/"
 	ServiceProxyName         = "service.kubernetes.io/service-proxy-name"
+
+	PublicIPSetAnnotationKey = "game.kruise.io/lb-public-ip-set"
 )
 
 type MultiElbsPlugin struct {
@@ -276,21 +278,25 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 
 		// Automatically update LoadBalancerIP to the ingress external IP
 		ingressIP := svc.Status.LoadBalancer.Ingress[0].IP
-		if len(svc.Status.LoadBalancer.Ingress) == 2 {
-			ingressIP = svc.Status.LoadBalancer.Ingress[1].IP
-			if ingressIP != "" && svc.Spec.LoadBalancerIP != ingressIP {
-				svc.Spec.LoadBalancerIP = ingressIP
-				err := c.Update(ctx, svc)
-				if err != nil {
-					return pod, cperrors.ToPluginError(err, cperrors.ApiCallError)
-				}
-				// Re-fetch the service to ensure we have the latest version
-				err = c.Get(ctx, types.NamespacedName{
-					Name:      pod.GetName() + "-" + strings.ToLower(lbName),
-					Namespace: pod.GetNamespace(),
-				}, svc)
-				if err != nil {
-					return pod, cperrors.NewPluginError(cperrors.ApiCallError, err.Error())
+		log.Infof("publicIp: %s internalIp: %s", svc.Status.LoadBalancer.Ingress[0].IP, svc.Status.LoadBalancer.Ingress[1].IP)
+		if svc.GetAnnotations()[PublicIPSetAnnotationKey] != "true" {
+			if len(svc.Status.LoadBalancer.Ingress) >= 2 {
+				ingressIP = svc.Status.LoadBalancer.Ingress[1].IP
+				if ingressIP != "" && svc.Spec.LoadBalancerIP != ingressIP {
+					svc.Spec.LoadBalancerIP = ingressIP
+					svc.GetAnnotations()[PublicIPSetAnnotationKey] = "true"
+					err := c.Update(ctx, svc)
+					if err != nil {
+						return pod, cperrors.ToPluginError(err, cperrors.ApiCallError)
+					}
+					// Re-fetch the service to ensure we have the latest version
+					err = c.Get(ctx, types.NamespacedName{
+						Name:      pod.GetName() + "-" + strings.ToLower(lbName),
+						Namespace: pod.GetNamespace(),
+					}, svc)
+					if err != nil {
+						return pod, cperrors.NewPluginError(cperrors.ApiCallError, err.Error())
+					}
 				}
 			}
 		}
@@ -320,9 +326,10 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 		internalAddresses := make([]gamekruiseiov1alpha1.NetworkAddress, 0)
 		externalAddresses := make([]gamekruiseiov1alpha1.NetworkAddress, 0)
 
-		endPoints = endPoints + svc.Status.LoadBalancer.Ingress[0].Hostname + "/" + lbName
+		endPoints = endPoints + svc.Status.LoadBalancer.Ingress[0].IP + "/" + lbName
 		if i != len(conf.idList[0])-1 {
 			endPoints = endPoints + ","
+			log.Info(endPoints)
 		}
 		for _, port := range svc.Spec.Ports {
 			instrIPort := port.TargetPort
