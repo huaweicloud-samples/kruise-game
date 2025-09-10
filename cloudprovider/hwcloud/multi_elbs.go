@@ -208,6 +208,7 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 		if err != nil {
 			if errors.IsNotFound(err) {
 				service, err := m.consSvc(podLbsPorts, conf, pod, lbName, c, ctx)
+				log.Info("create service 1")
 				if err != nil {
 					return pod, cperrors.ToPluginError(err, cperrors.ParameterError)
 				}
@@ -229,6 +230,7 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 		if err != nil {
 			if errors.IsNotFound(err) {
 				service, err := m.consSvc(podLbsPorts, conf, pod, lbName, c, ctx)
+				log.Info("create service 2")
 				if err != nil {
 					return pod, cperrors.ToPluginError(err, cperrors.ParameterError)
 				}
@@ -326,9 +328,14 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 		internalAddresses := make([]gamekruiseiov1alpha1.NetworkAddress, 0)
 		externalAddresses := make([]gamekruiseiov1alpha1.NetworkAddress, 0)
 
-		endPoints = endPoints + svc.Status.LoadBalancer.Ingress[0].IP + "/" + lbName
+		host := svc.Status.LoadBalancer.Ingress[0].Hostname
+		if host == "" {
+			host = svc.Status.LoadBalancer.Ingress[0].IP
+		}
+		endPoints = endPoints + host + "/" + lbName
 		if i != len(conf.idList[0])-1 {
 			endPoints = endPoints + ","
+			log.Infof("i:%s\n idlist: %s", i, conf.idList[0])
 			log.Info(endPoints)
 		}
 		for _, port := range svc.Spec.Ports {
@@ -346,7 +353,7 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 			}
 			externalAddress := gamekruiseiov1alpha1.NetworkAddress{
 				EndPoint: endPoints,
-				IP:       ingressIP,
+				IP:       "",
 				Ports: []gamekruiseiov1alpha1.NetworkPort{
 					{
 						Name:     port.Name,
