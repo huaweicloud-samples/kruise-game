@@ -323,7 +323,8 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 			log.Info("not ready network 返回")
 			networkStatus.CurrentNetworkState = gamekruiseiov1alpha1.NetworkNotReady
 			pod, err = networkManager.UpdateNetworkStatus(*networkStatus, pod)
-			return pod, cperrors.ToPluginError(err, cperrors.InternalError)
+			return pod, cperrors.NewPluginError(cperrors.InternalError, "network not ready, waiting for LoadBalancer Ingress")
+			//return pod, cperrors.ToPluginError(err, cperrors.InternalError)
 		}
 
 		// Automatically update LoadBalancerIP to the ingress external IP
@@ -391,6 +392,9 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 		host := svc.Status.LoadBalancer.Ingress[0].Hostname
 		if host == "" {
 			host = ingressIP
+		}
+		if svc.GetAnnotations()[PublicIPSetAnnotationKey] == "true" {
+			host = svc.Spec.LoadBalancerIP
 		}
 		endPoints = endPoints + host + "/" + lbName
 		log.Info(endPoints)
