@@ -59,7 +59,6 @@ const (
 	//ProtocolTCPUDP corev1.Protocol = "TCPUDP"
 
 	PrefixReadyReadinessGate = "service.readiness.hwcloud.com/"
-	ServiceProxyName         = "service.kubernetes.io/service-proxy-name"
 
 	PublicIPSetAnnotationKey = "game.kruise.io/lb-public-ip-set"
 
@@ -336,41 +335,41 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 			log.V(5).Info("not ready network 返回")
 			networkStatus.CurrentNetworkState = gamekruiseiov1alpha1.NetworkNotReady
 			pod, err = networkManager.UpdateNetworkStatus(*networkStatus, pod)
-			return pod, cperrors.NewPluginError(cperrors.InternalError, "network not ready, waiting for LoadBalancer Ingress")
-			//return pod, cperrors.ToPluginError(err, cperrors.InternalError)
+			//return pod, cperrors.NewPluginError(cperrors.InternalError, "network not ready, waiting for LoadBalancer Ingress")
+			return pod, cperrors.ToPluginError(err, cperrors.InternalError)
 		}
 
-		// Automatically update LoadBalancerIP to the ingress external IP
+		//// Automatically update LoadBalancerIP to the ingress external IP
 		ingressIP := svc.Status.LoadBalancer.Ingress[0].IP
-		log.V(5).Infof("podname:%s ", pod.Name)
-		log.V(5).Infof("publicIp: %s internalIp: %s", svc.Status.LoadBalancer.Ingress[0].IP, svc.Status.LoadBalancer.Ingress[1].IP)
-		log.V(5).Info(svc.GetAnnotations()[PublicIPSetAnnotationKey])
-		log.V(5).Infof("该注解对应服务名：%v", svc.Name)
-		if svc.GetAnnotations()[PublicIPSetAnnotationKey] != "true" {
-			log.V(5).Info("Annotations为false")
-			if len(svc.Status.LoadBalancer.Ingress) >= 2 {
-				log.V(5).Info("Ingress长度等于2")
-				ingressIP = svc.Status.LoadBalancer.Ingress[1].IP
-				if ingressIP != "" && svc.Spec.LoadBalancerIP != ingressIP {
-					log.V(5).Infof("更新LoadBalancerIP为公网IP %s", ingressIP)
-					log.V(5).Infof("podname:%s ", pod.Name)
-					svc.Spec.LoadBalancerIP = ingressIP
-					svc.GetAnnotations()[PublicIPSetAnnotationKey] = "true"
-					err := c.Update(ctx, svc)
-					if err != nil {
-						return pod, cperrors.ToPluginError(err, cperrors.ApiCallError)
-					}
-					// Re-fetch the service to ensure we have the latest version
-					err = c.Get(ctx, types.NamespacedName{
-						Name:      pod.GetName() + "-" + strings.ToLower(lbName),
-						Namespace: pod.GetNamespace(),
-					}, svc)
-					if err != nil {
-						return pod, cperrors.NewPluginError(cperrors.ApiCallError, err.Error())
-					}
-				}
-			}
-		}
+		//log.V(5).Infof("podname:%s ", pod.Name)
+		//log.V(5).Infof("publicIp: %s internalIp: %s", svc.Status.LoadBalancer.Ingress[0].IP, svc.Status.LoadBalancer.Ingress[1].IP)
+		//log.V(5).Info(svc.GetAnnotations()[PublicIPSetAnnotationKey])
+		//log.V(5).Infof("该注解对应服务名：%v", svc.Name)
+		//if svc.GetAnnotations()[PublicIPSetAnnotationKey] != "true" {
+		//	log.V(5).Info("Annotations为false")
+		//	if len(svc.Status.LoadBalancer.Ingress) >= 2 {
+		//		log.V(5).Info("Ingress长度等于2")
+		//		ingressIP = svc.Status.LoadBalancer.Ingress[1].IP
+		//		if ingressIP != "" && svc.Spec.LoadBalancerIP != ingressIP {
+		//			log.V(5).Infof("更新LoadBalancerIP为公网IP %s", ingressIP)
+		//			log.V(5).Infof("podname:%s ", pod.Name)
+		//			svc.Spec.LoadBalancerIP = ingressIP
+		//			svc.GetAnnotations()[PublicIPSetAnnotationKey] = "true"
+		//			err := c.Update(ctx, svc)
+		//			if err != nil {
+		//				return pod, cperrors.ToPluginError(err, cperrors.ApiCallError)
+		//			}
+		//			// Re-fetch the service to ensure we have the latest version
+		//			err = c.Get(ctx, types.NamespacedName{
+		//				Name:      pod.GetName() + "-" + strings.ToLower(lbName),
+		//				Namespace: pod.GetNamespace(),
+		//			}, svc)
+		//			if err != nil {
+		//				return pod, cperrors.NewPluginError(cperrors.ApiCallError, err.Error())
+		//			}
+		//		}
+		//	}
+		//}
 		_, readyCondition := util.GetPodConditionFromList(pod.Status.Conditions, corev1.PodReady)
 		if readyCondition == nil || readyCondition.Status == corev1.ConditionFalse {
 			log.V(5).Infof("podname:%s ", pod.Name)
@@ -408,7 +407,7 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 			host = svc.Spec.LoadBalancerIP
 		}
 		endPoints = endPoints + host + "/" + lbName
-		log.Info(endPoints)
+		log.V(5).Info(endPoints)
 		if i != len(conf.idList[podLbsPorts.index])-1 {
 			endPoints = endPoints + ","
 		}
@@ -590,7 +589,6 @@ func (m *MultiElbsPlugin) consSvc(podLbsPorts *lbsPorts, conf *multiELBsConfig, 
 			Annotations: svcAnnotations,
 			Labels: map[string]string{
 				ServiceBelongNetworkTypeKey: MultiElbsNetwork,
-				ServiceProxyName:            "dummy",
 			},
 			OwnerReferences: getSvcOwnerReference(c, ctx, pod, conf.isFixed),
 		},
