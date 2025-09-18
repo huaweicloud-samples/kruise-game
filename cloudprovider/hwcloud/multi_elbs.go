@@ -56,9 +56,7 @@ const (
 	// service label defined by OKG
 	ServiceBelongNetworkTypeKey = "game.kruise.io/network-type"
 
-	//ProtocolTCPUDP corev1.Protocol = "TCPUDP"
-
-	PrefixReadyReadinessGate = "service.readiness.hwcloud.com/"
+	PrefixReadyReadinessGate = "target-health.elb.k8s.cce/"
 
 	PublicIPSetAnnotationKey = "game.kruise.io/lb-public-ip-set"
 
@@ -188,11 +186,11 @@ func (m *MultiElbsPlugin) OnPodAdded(c client.Client, pod *corev1.Pod, ctx conte
 			lbNames = append(lbNames, lbName)
 		}
 	}
-	//for _, lbName := range lbNames {
-	//	pod.Spec.ReadinessGates = append(pod.Spec.ReadinessGates, corev1.PodReadinessGate{
-	//		ConditionType: corev1.PodConditionType(PrefixReadyReadinessGate + pod.GetName() + "-" + strings.ToLower(lbName)),
-	//	})
-	//}
+	for _, lbName := range lbNames {
+		pod.Spec.ReadinessGates = append(pod.Spec.ReadinessGates, corev1.PodReadinessGate{
+			ConditionType: corev1.PodConditionType(PrefixReadyReadinessGate + pod.GetName() + "-" + strings.ToLower(lbName)),
+		})
+	}
 
 	return pod, nil
 }
@@ -446,28 +444,6 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 	}
 	log.V(5).Infof("podname:%s ", pod.Name)
 	log.V(5).Info("测试第二次循环时间，结束")
-	//for _, lbName := range conf.lbNames {
-	//	conditionType := corev1.PodConditionType(PrefixReadyReadinessGate + pod.GetName() + "-" + strings.ToLower(lbName))
-	//
-	//	// 设置ReadinessGate Condition状态
-	//	conditionStatus := corev1.ConditionFalse
-	//	if networkStatus.CurrentNetworkState == gamekruiseiov1alpha1.NetworkReady {
-	//		conditionStatus = corev1.ConditionTrue
-	//	}
-	//
-	//	// 查找或创建Condition
-	//	condition, conditionIndex := util.GetPodConditionFromList(pod.Status.Conditions, conditionType)
-	//	if conditionIndex == nil {
-	//		conditionSpec := &corev1.PodCondition{
-	//			Type:   conditionType,
-	//			Status: conditionStatus,
-	//		}
-	//		pod.Status.Conditions = append(pod.Status.Conditions, *conditionSpec)
-	//	} else {
-	//		pod.Status.Conditions[condition].Status = conditionStatus
-	//		pod.Status.Conditions[condition].LastTransitionTime = metav1.Now()
-	//	}
-	//}
 
 	networkStatus.CurrentNetworkState = gamekruiseiov1alpha1.NetworkReady
 	pod, err = networkManager.UpdateNetworkStatus(*networkStatus, pod)
