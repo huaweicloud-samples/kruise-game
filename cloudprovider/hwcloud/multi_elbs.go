@@ -18,6 +18,7 @@ package hwcloud
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"strconv"
@@ -66,6 +67,7 @@ const (
 	ElbHealthCheckOptionAnnotationKey  = "kubernetes.io/elb.health-check-option"
 	ElbHealthCheckOptionsAnnotationKey = "kubernetes.io/elb.health-check-options"
 	ElbHealthCheckOptionsConfigName    = "LBHealthCheckConfig"
+	ElbUserDefineConfigName            = "UserDefine"
 
 	ElbPortMappingResultCount = "cce.io/game.kruise.mapping-result-count"
 )
@@ -507,6 +509,7 @@ type multiELBsConfig struct {
 	elbClass              string
 	lbHealthCheckFlag     string
 	lbHealthCheckConfig   string
+	userDefine            string
 }
 
 func (m *MultiElbsPlugin) consSvc(podLbsPorts *lbsPorts, conf *multiELBsConfig, pod *corev1.Pod, lbName string, c client.Client, ctx context.Context) (*corev1.Service, error) {
@@ -550,7 +553,14 @@ func (m *MultiElbsPlugin) consSvc(podLbsPorts *lbsPorts, conf *multiELBsConfig, 
 		ElbConfigHashKey:                util.GetHash(conf),
 		ElbHealthCheckFlagAnnotationKey: conf.lbHealthCheckFlag,
 	}
-	maps.Copy(svcAnnotations, conf.hwOptions)
+	hwOptions := make(map[string]string)
+	err := json.Unmarshal([]byte(conf.userDefine), &hwOptions)
+	if err != nil {
+		log.Warningf("[%s] failed to unmarshal userDefine config: %s, err: %v", MultiElbsNetwork, conf.userDefine, err)
+	} else {
+		log.Infof("[%s] successfully unmarshaled userDefine config: %v", MultiElbsNetwork, hwOptions)
+	}
+	maps.Copy(svcAnnotations, hwOptions)
 
 	if conf.lbHealthCheckFlag == "on" && conf.lbHealthCheckConfig != "" {
 		svcAnnotations[ElbHealthCheckOptionsAnnotationKey] = conf.lbHealthCheckConfig
@@ -709,6 +719,7 @@ func parseMultiELBsConfig(conf []gamekruiseiov1alpha1.NetworkConfParams) (*multi
 	elbClass := "performance"
 	elbHealthCheckConfig := ""
 	elbHealthCheckFlag := "on"
+	userDefine := ""
 
 	for _, c := range conf {
 		switch c.Name {
@@ -769,6 +780,8 @@ func parseMultiELBsConfig(conf []gamekruiseiov1alpha1.NetworkConfParams) (*multi
 			elbHealthCheckFlag = c.Value
 		case ElbHealthCheckOptionsConfigName:
 			elbHealthCheckConfig = c.Value
+		case ElbUserDefineConfigName:
+			userDefine = c.Value
 		default:
 			if _, exists := notAllowedAnnotationKeyMap[c.Name]; !exists {
 				hwOptions[c.Name] = c.Value
@@ -807,5 +820,6 @@ func parseMultiELBsConfig(conf []gamekruiseiov1alpha1.NetworkConfParams) (*multi
 		elbClass:              elbClass,
 		lbHealthCheckFlag:     elbHealthCheckFlag,
 		lbHealthCheckConfig:   elbHealthCheckConfig,
+		userDefine:            userDefine,
 	}, nil
 }
