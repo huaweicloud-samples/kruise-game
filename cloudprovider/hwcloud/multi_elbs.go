@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"strconv"
 	"strings"
 	"sync"
@@ -230,9 +229,9 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 	//log.V(5).Infof("allocate 耗时: %v", elapsed)
 
 	//log.V(5).Infof("长度:%v,索引:%v", len(conf.idList), podLbsPorts.index)
-	for i := 0; i < len(conf.idList); i++ {
-		//log.V(5).Infof("idlist: %s", conf.idList[i])
-	}
+	//for i := 0; i < len(conf.idList); i++ {
+	//log.V(5).Infof("idlist: %s", conf.idList[i])
+	//}
 	if err != nil {
 		return pod, cperrors.ToPluginError(err, cperrors.ParameterError)
 	}
@@ -499,7 +498,6 @@ func init() {
 
 type multiELBsConfig struct {
 	lbNames               map[string]string
-	hwOptions             map[string]string
 	idList                [][]string
 	targetPorts           []int
 	protocols             []corev1.Protocol
@@ -554,14 +552,22 @@ func (m *MultiElbsPlugin) consSvc(podLbsPorts *lbsPorts, conf *multiELBsConfig, 
 		ElbConfigHashKey:                util.GetHash(conf),
 		ElbHealthCheckFlagAnnotationKey: conf.lbHealthCheckFlag,
 	}
-	hwOptions := make(map[string]string)
-	err := json.Unmarshal([]byte(conf.userDefine), &hwOptions)
-	if err != nil {
-		log.Warningf("[%s] failed to unmarshal userDefine config: %s, err: %v", MultiElbsNetwork, conf.userDefine, err)
-	} else {
-		log.Infof("[%s] successfully unmarshaled userDefine config: %v", MultiElbsNetwork, hwOptions)
+	if conf.userDefine != "" {
+		hwOptions := make(map[string]string)
+		err := json.Unmarshal([]byte(conf.userDefine), &hwOptions)
+		if err != nil {
+			log.Warningf("[%s] failed to unmarshal userDefine config: %s, err: %v", MultiElbsNetwork, conf.userDefine, err)
+		} else {
+			log.Infof("[%s] successfully unmarshaled userDefine config: %v", MultiElbsNetwork, hwOptions)
+		}
+		for k, v := range hwOptions {
+			if _, exists := notAllowedAnnotationKeyMap[k]; !exists {
+				svcAnnotations[k] = v
+			} else {
+				log.Warningf("[%s] not allowed annotation key %s in UserDefine", MultiElbsNetwork, k)
+			}
+		}
 	}
-	maps.Copy(svcAnnotations, hwOptions)
 
 	if conf.lbHealthCheckFlag == "on" && conf.lbHealthCheckConfig != "" {
 		svcAnnotations[ElbHealthCheckOptionsAnnotationKey] = conf.lbHealthCheckConfig
@@ -708,20 +714,18 @@ func (m *MultiElbsPlugin) deAllocate(nsName string) {
 
 func parseMultiELBsConfig(conf []gamekruiseiov1alpha1.NetworkConfParams) (*multiELBsConfig, error) {
 	// lbNames format {id}: {name}
+	var elbHealthCheckConfig, userDefine string
+	var idNums int
 	lbNames := make(map[string]string)
 	idList := make([][]string, 0)
 	nameNums := make(map[string]int)
-	hwOptions := make(map[string]string)
 	ports := make([]int, 0)
 	protocols := make([]corev1.Protocol, 0)
 	isFixed := false
 	externalTrafficPolicy := corev1.ServiceExternalTrafficPolicyTypeLocal
 	allocatePolicy := "default"
 	elbClass := "performance"
-	elbHealthCheckConfig := ""
 	elbHealthCheckFlag := "on"
-	userDefine := ""
-	idNums := 0
 
 	for _, c := range conf {
 		switch c.Name {
@@ -786,11 +790,6 @@ func parseMultiELBsConfig(conf []gamekruiseiov1alpha1.NetworkConfParams) (*multi
 		case ElbUserDefineConfigName:
 			userDefine = c.Value
 		default:
-			if _, exists := notAllowedAnnotationKeyMap[c.Name]; !exists {
-				hwOptions[c.Name] = c.Value
-			} else {
-				log.Warningf("[%s] not allowed annotation key %s", MultiElbsNetwork, c.Name)
-			}
 		}
 	}
 
@@ -813,7 +812,6 @@ func parseMultiELBsConfig(conf []gamekruiseiov1alpha1.NetworkConfParams) (*multi
 
 	return &multiELBsConfig{
 		lbNames:               lbNames,
-		hwOptions:             hwOptions,
 		idList:                idList,
 		targetPorts:           ports,
 		protocols:             protocols,
