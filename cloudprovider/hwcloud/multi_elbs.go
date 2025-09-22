@@ -620,6 +620,10 @@ func (m *MultiElbsPlugin) allocate(conf *multiELBsConfig, nsName string) (*lbsPo
 
 	// init cache according to conf.idList
 	lenCache := len(m.cache)
+
+	if lenCache > len(conf.idList) {
+		m.cache = m.cache[:len(conf.idList)]
+	}
 	for i := lenCache; i < len(conf.idList); i++ {
 		cacheLevel := make([]bool, int(m.maxPort-m.minPort)+1)
 		for _, p := range m.blockPorts {
