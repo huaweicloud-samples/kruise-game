@@ -188,11 +188,11 @@ func (m *MultiElbsPlugin) OnPodAdded(c client.Client, pod *corev1.Pod, ctx conte
 			lbNames = append(lbNames, lbName)
 		}
 	}
-	for _, lbName := range lbNames {
-		pod.Spec.ReadinessGates = append(pod.Spec.ReadinessGates, corev1.PodReadinessGate{
-			ConditionType: corev1.PodConditionType(PrefixReadyReadinessGate + pod.GetName() + "-" + strings.ToLower(lbName)),
-		})
-	}
+	//for _, lbName := range lbNames {
+	//	pod.Spec.ReadinessGates = append(pod.Spec.ReadinessGates, corev1.PodReadinessGate{
+	//		ConditionType: corev1.PodConditionType(PrefixReadyReadinessGate + pod.GetName() + "-" + strings.ToLower(lbName)),
+	//	})
+	//}
 
 	return pod, nil
 }
