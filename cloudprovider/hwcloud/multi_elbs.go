@@ -195,20 +195,11 @@ func (m *MultiElbsPlugin) OnPodAdded(c client.Client, pod *corev1.Pod, ctx conte
 }
 
 func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx context.Context) (*corev1.Pod, cperrors.PluginError) {
-	//podJSON, err := json.MarshalIndent(pod, "", "  ")
-	//if err == nil {
-	//	log.Infof("Pod 状态: %s", string(podJSON))
-	//}
-	//seq := atomic.AddInt64(&m.reconcileCount, 1)
-	//log.V(5).Infof("podname:%s ", pod.Name)
-	//log.V(5).Infof("OnPodUpdated调用次数:%v", seq)
 	networkManager := utils.NewNetworkManager(pod, c)
 
 	networkStatus, _ := networkManager.GetNetworkStatus()
 	networkConfig := networkManager.GetNetworkConfig()
 	if networkStatus == nil {
-		//log.V(5).Infof("podname:%s ", pod.Name)
-		//log.V(5).Infof("networkStatus为空，返回")
 		pod, err := networkManager.UpdateNetworkStatus(gamekruiseiov1alpha1.NetworkStatus{
 			CurrentNetworkState: gamekruiseiov1alpha1.NetworkNotReady,
 		}, pod)
@@ -221,15 +212,7 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 	}
 
 	podNsName := pod.GetNamespace() + "/" + pod.GetName()
-	//start := time.Now()
 	podLbsPorts, err := m.allocate(conf, podNsName)
-	//elapsed := time.Since(start)
-	//log.V(5).Infof("allocate 耗时: %v", elapsed)
-
-	//log.V(5).Infof("长度:%v,索引:%v", len(conf.idList), podLbsPorts.index)
-	//for i := 0; i < len(conf.idList); i++ {
-	//log.V(5).Infof("idlist: %s", conf.idList[i])
-	//}
 	if err != nil {
 		return pod, cperrors.ToPluginError(err, cperrors.ParameterError)
 	}
@@ -245,9 +228,6 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 		if err != nil {
 			if errors.IsNotFound(err) {
 				service, err := m.consSvc(podLbsPorts, conf, pod, lbName, c, ctx)
-				//log.V(5).Infof("podname:%s ", pod.Name)
-				//log.V(5).Infof("create service 1")
-				//log.V(5).Infof("服务名：%v", service.Name)
 				if err != nil {
 					return pod, cperrors.ToPluginError(err, cperrors.ParameterError)
 				}
@@ -256,17 +236,12 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 					return pod, cperrors.NewPluginError(cperrors.ApiCallError, err.Error())
 				}
 				continue
-				//return pod, cperrors.ToPluginError(c.Create(ctx, service), cperrors.ApiCallError)
 			}
 			return pod, cperrors.NewPluginError(cperrors.ApiCallError, err.Error())
 		}
 	}
-	//log.V(5).Info("测试第二次循环时间，开始")
 	endPoints := ""
 	for i, lbId := range conf.idList[podLbsPorts.index] {
-		//log.V(5).Infof("podname:%s ", pod.Name)
-		//log.V(5).Infof("内部遍历第%v次", i+1)
-		//log.V(5).Infof("当前idlist: %s", conf.idList[podLbsPorts.index])
 		// get svc
 		lbName := conf.lbNames[lbId]
 		svc := &corev1.Service{}
@@ -275,11 +250,8 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 			Namespace: pod.GetNamespace(),
 		}, svc)
 		if err != nil {
-			//log.V(5).Infof("podname:%s ", pod.Name)
-			//log.V(5).Info("get service 2 返回")
 			if errors.IsNotFound(err) {
 				service, err := m.consSvc(podLbsPorts, conf, pod, lbName, c, ctx)
-				//log.V(5).Info("create service 2")
 				if err != nil {
 					return pod, cperrors.ToPluginError(err, cperrors.ParameterError)
 				}
@@ -296,8 +268,6 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 
 		// update svc
 		if util.GetHash(conf) != svc.GetAnnotations()[ElbConfigHashKey] {
-			//log.V(5).Infof("podname:%s ", pod.Name)
-			//log.V(5).Info("update service 返回")
 			networkStatus.CurrentNetworkState = gamekruiseiov1alpha1.NetworkNotReady
 			pod, err = networkManager.UpdateNetworkStatus(*networkStatus, pod)
 			if err != nil {
@@ -312,65 +282,26 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 
 		// disable network
 		if networkManager.GetNetworkDisabled() && svc.Spec.Type == corev1.ServiceTypeLoadBalancer {
-			//log.V(5).Infof("podname:%s ", pod.Name)
-			//log.V(5).Info("disable network 返回")
 			svc.Spec.Type = corev1.ServiceTypeClusterIP
 			return pod, cperrors.ToPluginError(c.Update(ctx, svc), cperrors.ApiCallError)
 		}
 
 		// enable network
 		if !networkManager.GetNetworkDisabled() && svc.Spec.Type == corev1.ServiceTypeClusterIP {
-			//log.V(5).Infof("podname:%s ", pod.Name)
-			//log.V(5).Info("enable network 返回")
 			svc.Spec.Type = corev1.ServiceTypeLoadBalancer
 			return pod, cperrors.ToPluginError(c.Update(ctx, svc), cperrors.ApiCallError)
 		}
 
 		// network not ready
 		if svc.Status.LoadBalancer.Ingress == nil || len(svc.Status.LoadBalancer.Ingress) == 0 {
-			//log.V(5).Infof("podname:%s ", pod.Name)
-			//log.V(5).Info("not ready network 返回")
 			networkStatus.CurrentNetworkState = gamekruiseiov1alpha1.NetworkNotReady
 			pod, err = networkManager.UpdateNetworkStatus(*networkStatus, pod)
-			//return pod, cperrors.NewPluginError(cperrors.InternalError, "network not ready, waiting for LoadBalancer Ingress")
 			return pod, cperrors.ToPluginError(err, cperrors.InternalError)
 		}
 
-		//// Automatically update LoadBalancerIP to the ingress external IP
 		ingressIP := svc.Status.LoadBalancer.Ingress[0].IP
-		////log.V(5).Infof("podname:%s ", pod.Name)
-		////log.V(5).Infof("publicIp: %s internalIp: %s", svc.Status.LoadBalancer.Ingress[0].IP, svc.Status.LoadBalancer.Ingress[1].IP)
-		////log.V(5).Info(svc.GetAnnotations()[PublicIPSetAnnotationKey])
-		////log.V(5).Infof("该注解对应服务名：%v", svc.Name)
-		//if svc.GetAnnotations()[PublicIPSetAnnotationKey] != "true" {
-		//	//log.V(5).Info("Annotations为false")
-		//	if len(svc.Status.LoadBalancer.Ingress) >= 2 {
-		//		//log.V(5).Info("Ingress长度等于2")
-		//		ingressIP = svc.Status.LoadBalancer.Ingress[1].IP
-		//		if ingressIP != "" && svc.Spec.LoadBalancerIP != ingressIP {
-		//			//log.V(5).Infof("更新LoadBalancerIP为公网IP %s", ingressIP)
-		//			//log.V(5).Infof("podname:%s ", pod.Name)
-		//			svc.Spec.LoadBalancerIP = ingressIP
-		//			svc.GetAnnotations()[PublicIPSetAnnotationKey] = "true"
-		//			err := c.Update(ctx, svc)
-		//			if err != nil {
-		//				return pod, cperrors.ToPluginError(err, cperrors.ApiCallError)
-		//			}
-		//			// Re-fetch the service to ensure we have the latest version
-		//			err = c.Get(ctx, types.NamespacedName{
-		//				Name:      pod.GetName() + "-" + strings.ToLower(lbName),
-		//				Namespace: pod.GetNamespace(),
-		//			}, svc)
-		//			if err != nil {
-		//				return pod, cperrors.NewPluginError(cperrors.ApiCallError, err.Error())
-		//			}
-		//		}
-		//	}
-		//}
 		_, readyCondition := util.GetPodConditionFromList(pod.Status.Conditions, corev1.PodReady)
 		if readyCondition == nil || readyCondition.Status == corev1.ConditionFalse {
-			//log.V(5).Infof("podname:%s ", pod.Name)
-			//log.V(5).Info("readyCondition 返回")
 			networkStatus.CurrentNetworkState = gamekruiseiov1alpha1.NetworkNotReady
 			pod, err = networkManager.UpdateNetworkStatus(*networkStatus, pod)
 			return pod, cperrors.ToPluginError(err, cperrors.InternalError)
@@ -395,13 +326,11 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 		internalAddresses := make([]gamekruiseiov1alpha1.NetworkAddress, 0)
 		externalAddresses := make([]gamekruiseiov1alpha1.NetworkAddress, 0)
 
-		//log.V(5).Infof("spec.loadbalancerip:%s,ingressip:%s", svc.Spec.LoadBalancerIP, ingressIP)
 		host := svc.Status.LoadBalancer.Ingress[0].Hostname
 		if host == "" {
 			host = ingressIP
 		}
 		endPoints = endPoints + host + "/" + lbName
-		//log.V(5).Info(endPoints)
 		if i != len(conf.idList[podLbsPorts.index])-1 {
 			endPoints = endPoints + ","
 		}
@@ -418,8 +347,6 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 					},
 				},
 			}
-			//log.V(5).Infof("podname:%s ", pod.Name)
-			//log.V(5).Info("set endPoints ", endPoints)
 			externalAddress := gamekruiseiov1alpha1.NetworkAddress{
 				EndPoint: endPoints,
 				IP:       "",
@@ -438,13 +365,9 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 		networkStatus.InternalAddresses = internalAddresses
 		networkStatus.ExternalAddresses = externalAddresses
 	}
-	//log.V(5).Infof("podname:%s ", pod.Name)
-	//log.V(5).Info("测试第二次循环时间，结束")
 
 	networkStatus.CurrentNetworkState = gamekruiseiov1alpha1.NetworkReady
 	pod, err = networkManager.UpdateNetworkStatus(*networkStatus, pod)
-	//log.V(5).Infof("podname:%s ", pod.Name)
-	//log.V(5).Info("finish 返回")
 	return pod, cperrors.ToPluginError(err, cperrors.InternalError)
 }
 
