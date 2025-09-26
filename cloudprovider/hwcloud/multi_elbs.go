@@ -61,10 +61,10 @@ const (
 	ElbHealthCheckFlagAnnotationKey = "kubernetes.io/elb.health-check-flag"
 	ElbHealthCheckFlagConfigName    = "LBHealthCheckFlag"
 
-	ElbHealthCheckOptionAnnotationKey  = "kubernetes.io/elb.health-check-option"
-	ElbHealthCheckOptionsAnnotationKey = "kubernetes.io/elb.health-check-options"
-	ElbHealthCheckOptionsConfigName    = "LBHealthCheckConfig"
-	ElbUserDefineConfigName            = "UserDefine"
+	ElbHealthCheckOptionsAnnotationKey      = "kubernetes.io/elb.health-check-options"
+	ElbHealthCheckOptionsConfigName         = "LBHealthCheckConfig"
+	ElbUserDefineConfigName                 = "UserDefine"
+	AllocateLoadBalancerNodePortsConfigName = "AllocateLoadBalancerNodePorts"
 
 	ElbPortMappingResultCount = "cce.io/game.kruise.mapping-result-count"
 )
@@ -415,18 +415,19 @@ func init() {
 }
 
 type multiELBsConfig struct {
-	lbNames               map[string]string
-	idList                [][]string
-	targetPorts           []int
-	protocols             []corev1.Protocol
-	isFixed               bool
-	externalTrafficPolicy corev1.ServiceExternalTrafficPolicyType
-	allocatePolicy        string
-	elbClass              string
-	lbHealthCheckFlag     string
-	lbHealthCheckConfig   string
-	userDefine            string
-	idNums                int
+	lbNames                       map[string]string
+	idList                        [][]string
+	targetPorts                   []int
+	protocols                     []corev1.Protocol
+	isFixed                       bool
+	externalTrafficPolicy         corev1.ServiceExternalTrafficPolicyType
+	allocatePolicy                string
+	elbClass                      string
+	lbHealthCheckFlag             string
+	lbHealthCheckConfig           string
+	userDefine                    string
+	idNums                        int
+	allocateLoadBalancerNodePorts bool
 }
 
 func (m *MultiElbsPlugin) consSvc(podLbsPorts *lbsPorts, conf *multiELBsConfig, pod *corev1.Pod, lbName string, c client.Client, ctx context.Context) (*corev1.Service, error) {
@@ -507,7 +508,7 @@ func (m *MultiElbsPlugin) consSvc(podLbsPorts *lbsPorts, conf *multiELBsConfig, 
 			OwnerReferences: getSvcOwnerReference(c, ctx, pod, conf.isFixed),
 		},
 		Spec: corev1.ServiceSpec{
-			AllocateLoadBalancerNodePorts: ptr.To[bool](false),
+			AllocateLoadBalancerNodePorts: ptr.To[bool](conf.allocateLoadBalancerNodePorts),
 			ExternalTrafficPolicy:         conf.externalTrafficPolicy,
 			Type:                          corev1.ServiceTypeLoadBalancer,
 			Selector: map[string]string{
@@ -644,10 +645,11 @@ func parseMultiELBsConfig(conf []gamekruiseiov1alpha1.NetworkConfParams) (*multi
 	ports := make([]int, 0)
 	protocols := make([]corev1.Protocol, 0)
 	isFixed := false
-	externalTrafficPolicy := corev1.ServiceExternalTrafficPolicyTypeLocal
+	externalTrafficPolicy := corev1.ServiceExternalTrafficPolicyTypeCluster
 	allocatePolicy := "default"
 	elbClass := "performance"
 	elbHealthCheckFlag := "on"
+	allocateLoadBalancerNodePorts := true
 
 	for _, c := range conf {
 		switch c.Name {
@@ -695,9 +697,15 @@ func parseMultiELBsConfig(conf []gamekruiseiov1alpha1.NetworkConfParams) (*multi
 			}
 			isFixed = v
 		case ExternalTrafficPolicyTypeConfigName:
-			if strings.EqualFold(c.Value, string(corev1.ServiceExternalTrafficPolicyTypeCluster)) {
-				externalTrafficPolicy = corev1.ServiceExternalTrafficPolicyTypeCluster
+			if strings.EqualFold(c.Value, string(corev1.ServiceExternalTrafficPolicyTypeLocal)) {
+				externalTrafficPolicy = corev1.ServiceExternalTrafficPolicyTypeLocal
 			}
+		case AllocateLoadBalancerNodePortsConfigName:
+			v, err := strconv.ParseBool(c.Value)
+			if err != nil {
+				return nil, fmt.Errorf("invalid AllocateLoadBalancerNodePorts %s", c.Value)
+			}
+			allocateLoadBalancerNodePorts = v
 		case AllocatePolicyConfigName:
 			allocatePolicy = c.Value
 			if allocatePolicy != "default" && allocatePolicy != "balanced" {
@@ -733,17 +741,18 @@ func parseMultiELBsConfig(conf []gamekruiseiov1alpha1.NetworkConfParams) (*multi
 	}
 
 	return &multiELBsConfig{
-		lbNames:               lbNames,
-		idList:                idList,
-		targetPorts:           ports,
-		protocols:             protocols,
-		isFixed:               isFixed,
-		externalTrafficPolicy: externalTrafficPolicy,
-		allocatePolicy:        allocatePolicy,
-		elbClass:              elbClass,
-		lbHealthCheckFlag:     elbHealthCheckFlag,
-		lbHealthCheckConfig:   elbHealthCheckConfig,
-		userDefine:            userDefine,
-		idNums:                idNums,
+		lbNames:                       lbNames,
+		idList:                        idList,
+		targetPorts:                   ports,
+		protocols:                     protocols,
+		isFixed:                       isFixed,
+		externalTrafficPolicy:         externalTrafficPolicy,
+		allocatePolicy:                allocatePolicy,
+		elbClass:                      elbClass,
+		lbHealthCheckFlag:             elbHealthCheckFlag,
+		lbHealthCheckConfig:           elbHealthCheckConfig,
+		userDefine:                    userDefine,
+		idNums:                        idNums,
+		allocateLoadBalancerNodePorts: allocateLoadBalancerNodePorts,
 	}, nil
 }
