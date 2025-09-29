@@ -709,7 +709,7 @@ func processHealthCheckOptions(healthCheckConfig string, podLbsPorts *lbsPorts) 
 	for i := range healthCheckOptions {
 		podTargetPortStr := healthCheckOptions[i].PodTargetPort
 		var originalPortStr, protocol string
-		
+
 		if podTargetPortStr != "" {
 			// Process pod_target_port field
 			parts := strings.Split(podTargetPortStr, ":")
@@ -733,7 +733,7 @@ func processHealthCheckOptions(healthCheckConfig string, podLbsPorts *lbsPorts) 
 			// No port configuration found
 			continue
 		}
-		
+
 		// Convert the port part to integer to match with pod ports
 		podPort, err := strconv.Atoi(originalPortStr)
 		if err != nil {
@@ -743,12 +743,12 @@ func processHealthCheckOptions(healthCheckConfig string, podLbsPorts *lbsPorts) 
 
 		// Look for the corresponding service port based on the pod port and protocol
 		found := false
-		
+
 		// First, look for exact pod port and protocol match
 		for j, targetPodPort := range podLbsPorts.targetPort {
 			if targetPodPort == podPort && j < len(podLbsPorts.protocols) {
 				serviceProtocol := strings.ToUpper(string(podLbsPorts.protocols[j]))
-				
+
 				// Handle TCPUDP protocol case
 				if serviceProtocol == "TCPUDP" {
 					// For TCPUDP, the same service port can handle both TCP and UDP protocols
@@ -816,13 +816,13 @@ func (m *MultiElbsPlugin) deAllocate(nsName string) {
 
 // HealthCheckOption represents a single health check configuration
 type HealthCheckOption struct {
-	Protocol          string `json:"protocol"`
-	Delay             string `json:"delay"`
-	Timeout           string `json:"timeout"`
-	MaxRetries        string `json:"max_retries"`
-	PodTargetPort     string `json:"pod_target_port"`     // Field from GSS config
-	TargetServicePort string `json:"target_service_port"` // Field to be used in service annotation
-	MonitorPort       string `json:"monitor_port"`
+	Protocol          string `json:"protocol,omitempty"`
+	Delay             string `json:"delay,omitempty"`
+	Timeout           string `json:"timeout,omitempty"`
+	MaxRetries        string `json:"max_retries,omitempty"`
+	PodTargetPort     string `json:"pod_target_port,omitempty"` // Field from GSS config
+	TargetServicePort string `json:"target_service_port"`       // Field to be used in service annotation
+	MonitorPort       string `json:"monitor_port,omitempty"`
 	Path              string `json:"path,omitempty"`
 	ExpectedCodes     string `json:"expected_codes,omitempty"`
 }
