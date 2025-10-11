@@ -395,6 +395,7 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 }
 
 func (m *MultiElbsPlugin) OnPodDeleted(c client.Client, pod *corev1.Pod, ctx context.Context) cperrors.PluginError {
+	log.Infof("执行OnPodDeleted：%s/%s", pod.GetNamespace(), pod.GetName())
 	networkManager := utils.NewNetworkManager(pod, c)
 	networkConfig := networkManager.GetNetworkConfig()
 	sc, err := parseMultiELBsConfig(networkConfig)
@@ -426,7 +427,7 @@ func (m *MultiElbsPlugin) OnPodDeleted(c client.Client, pod *corev1.Pod, ctx con
 	for _, podKey := range podKeys {
 		m.deAllocate(podKey)
 	}
-
+	log.Infof("完成OnPodDeleted：%s/%s", pod.GetNamespace(), pod.GetName())
 	return nil
 }
 
