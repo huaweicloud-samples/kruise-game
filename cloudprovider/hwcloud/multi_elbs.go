@@ -528,7 +528,8 @@ func (m *MultiElbsPlugin) consSvc(podLbsPorts *lbsPorts, conf *multiELBsConfig, 
 	svcAnnotations[LBIDBelongIndexKey] = strconv.Itoa(podLbsPorts.index)
 	svcAnnotations[ElbMappingPoolAnnotationKey] = lbName
 	svcAnnotations[ElbClassAnnotationKey] = conf.elbClass
-	svcAnnotations[ElbPortMappingResultCount] = strconv.Itoa(conf.idNums * portProtocolNum)
+	nums := len(podLbsPorts.lbIds)
+	svcAnnotations[ElbPortMappingResultCount] = strconv.Itoa(nums * portProtocolNum)
 
 	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
