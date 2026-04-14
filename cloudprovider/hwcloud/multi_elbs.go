@@ -262,6 +262,10 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 	for _, service := range servicesToCreate {
 		err = c.Create(ctx, service)
 		if err != nil {
+			if errors.IsAlreadyExists(err) {
+				log.Infof("[%s] service %s/%s already exists, skip creation", MultiElbsNetwork, service.Namespace, service.Name)
+				continue
+			}
 			return pod, cperrors.NewPluginError(cperrors.ApiCallError, err.Error())
 		}
 	}
