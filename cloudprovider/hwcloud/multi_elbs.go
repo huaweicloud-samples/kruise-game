@@ -800,19 +800,23 @@ func processHealthCheckOptions(healthCheckConfig string, podLbsPorts *lbsPorts) 
 	for _, option := range healthCheckOptions {
 		if option.PodTargetPort != "" {
 			// Process entries that have pod_target_port field
-			parts := strings.Split(option.PodTargetPort, ":")
+			parts := strings.SplitN(option.PodTargetPort, ":", 2)
 			if len(parts) != 2 {
 				log.Warningf("Invalid pod_target_port format: %s", option.PodTargetPort)
-				return "", nil // Return empty string to indicate health check should not be applied
+				continue
 			}
-			protocol := parts[0]
-			originalPortStr := parts[1]
+			protocol := strings.ToUpper(strings.TrimSpace(parts[0]))
+			originalPortStr := strings.TrimSpace(parts[1])
+			if protocol == "" || originalPortStr == "" {
+				log.Warningf("Invalid pod_target_port format: %s", option.PodTargetPort)
+				continue
+			}
 
 			// Convert the port part to integer to match with pod ports
 			podPort, err := strconv.Atoi(originalPortStr)
 			if err != nil {
 				log.Warningf("Invalid port number in pod_target_port: %s", originalPortStr)
-				return "", nil // Return empty string to indicate health check should not be applied
+				continue
 			}
 
 			// Look for the corresponding service port based on the pod port and protocol
@@ -820,7 +824,7 @@ func processHealthCheckOptions(healthCheckConfig string, podLbsPorts *lbsPorts) 
 
 			// First, look for exact pod port and protocol match
 			for j, targetPodPort := range podLbsPorts.targetPort {
-				if targetPodPort == podPort && j < len(podLbsPorts.protocols) {
+				if targetPodPort == podPort && j < len(podLbsPorts.protocols) && j < len(podLbsPorts.ports) {
 					serviceProtocol := strings.ToUpper(string(podLbsPorts.protocols[j]))
 
 					// Handle TCPUDP protocol case

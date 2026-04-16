@@ -18,6 +18,7 @@ package hwcloud
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
 	"sync"
 	"testing"
@@ -517,5 +518,44 @@ func TestConsSvc_UserDefineCannotOverrideControlledKeys(t *testing.T) {
 	}
 	if svc.Annotations["custom/ok"] != "1" {
 		t.Errorf("custom annotation actual: %v, expect: %v", svc.Annotations["custom/ok"], "1")
+	}
+}
+
+func TestProcessHealthCheckOptions_PartialInvalidDoesNotAbort(t *testing.T) {
+	podLbsPorts := &lbsPorts{
+		ports:      []int32{8001},
+		targetPort: []int{80},
+		protocols:  []corev1.Protocol{corev1.ProtocolTCP},
+	}
+	healthCheckConfig := `[
+		{"pod_target_port":" tcp : 80 ","monitor_port":"1"},
+		{"pod_target_port":"bad"},
+		{"pod_target_port":"TCP:notnum"},
+		{"monitor_port":"2"}
+	]`
+
+	out, err := processHealthCheckOptions(healthCheckConfig, podLbsPorts)
+	if err != nil {
+		t.Fatalf("processHealthCheckOptions error: %v", err)
+	}
+	if out == "" {
+		t.Fatalf("expect non-empty processed config")
+	}
+
+	var got []HealthCheckOption
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("unmarshal processed config error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expect 1 processed option, got %d: %+v", len(got), got)
+	}
+	if got[0].PodTargetPort != "" {
+		t.Errorf("PodTargetPort should be cleared, got %q", got[0].PodTargetPort)
+	}
+	if got[0].TargetServicePort != "TCP:8001" {
+		t.Errorf("TargetServicePort actual: %q, expect: %q", got[0].TargetServicePort, "TCP:8001")
+	}
+	if got[0].MonitorPort != "1" {
+		t.Errorf("MonitorPort should be preserved, got %q", got[0].MonitorPort)
 	}
 }
