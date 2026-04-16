@@ -27,8 +27,10 @@ import (
 	"github.com/openkruise/kruise-game/pkg/util"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 func TestParseMultiELBsConfig(t *testing.T) {
@@ -557,5 +559,118 @@ func TestProcessHealthCheckOptions_PartialInvalidDoesNotAbort(t *testing.T) {
 	}
 	if got[0].MonitorPort != "1" {
 		t.Errorf("MonitorPort should be preserved, got %q", got[0].MonitorPort)
+	}
+}
+
+func TestMultiElbsPlugin_OnPodUpdated_ExternalIPFilled(t *testing.T) {
+	plugin := &MultiElbsPlugin{
+		maxPort:     int32(8000),
+		minPort:     int32(8000),
+		blockPorts:  []int32{},
+		cache:       nil,
+		podAllocate: map[string]*lbsPorts{},
+		mutex:       sync.RWMutex{},
+	}
+
+	networkConf := []gamekruiseiov1alpha1.NetworkConfParams{
+		{
+			Name:  ElbIdNamesConfigName,
+			Value: "elb-1/pool-a",
+		},
+		{
+			Name:  PortProtocolsConfigName,
+			Value: "80/TCP",
+		},
+		{
+			Name:  ElbHealthCheckFlagConfigName,
+			Value: "off",
+		},
+	}
+	conf, err := parseMultiELBsConfig(networkConf)
+	if err != nil {
+		t.Fatalf("parseMultiELBsConfig error: %v", err)
+	}
+
+	svc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "pod-0-pool-a",
+			Annotations: map[string]string{
+				ElbConfigHashKey: util.GetHash(conf),
+			},
+		},
+		Spec: corev1.ServiceSpec{
+			Type: corev1.ServiceTypeLoadBalancer,
+			Selector: map[string]string{
+				SvcSelectorKey: "pod-0",
+			},
+			Ports: []corev1.ServicePort{
+				{
+					Name:       "80-tcp",
+					Port:       8000,
+					Protocol:   corev1.ProtocolTCP,
+					TargetPort: intstr.FromInt(80),
+				},
+			},
+		},
+		Status: corev1.ServiceStatus{
+			LoadBalancer: corev1.LoadBalancerStatus{
+				Ingress: []corev1.LoadBalancerIngress{
+					{IP: "1.2.3.4"},
+				},
+			},
+		},
+	}
+
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(svc).Build()
+
+	networkConfBytes, _ := json.Marshal(networkConf)
+	networkStatusBytes, _ := json.Marshal(gamekruiseiov1alpha1.NetworkStatus{CurrentNetworkState: gamekruiseiov1alpha1.NetworkNotReady})
+	pod := &corev1.Pod{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "v1",
+			Kind:       "Pod",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "pod-0",
+			UID:       "uid-0",
+			Labels:    map[string]string{},
+			Annotations: map[string]string{
+				gamekruiseiov1alpha1.GameServerNetworkType:   MultiElbsNetwork,
+				gamekruiseiov1alpha1.GameServerNetworkConf:   string(networkConfBytes),
+				gamekruiseiov1alpha1.GameServerNetworkStatus: string(networkStatusBytes),
+			},
+		},
+		Status: corev1.PodStatus{
+			PodIP: "10.0.0.1",
+			Conditions: []corev1.PodCondition{
+				{
+					Type:   corev1.PodReady,
+					Status: corev1.ConditionTrue,
+				},
+			},
+		},
+	}
+
+	updatedPod, perr := plugin.OnPodUpdated(c, pod, context.TODO())
+	if perr != nil {
+		t.Fatalf("OnPodUpdated error: %v", perr)
+	}
+
+	var got gamekruiseiov1alpha1.NetworkStatus
+	if err := json.Unmarshal([]byte(updatedPod.Annotations[gamekruiseiov1alpha1.GameServerNetworkStatus]), &got); err != nil {
+		t.Fatalf("unmarshal network status error: %v", err)
+	}
+	if got.CurrentNetworkState != gamekruiseiov1alpha1.NetworkReady {
+		t.Fatalf("CurrentNetworkState actual: %v, expect: %v", got.CurrentNetworkState, gamekruiseiov1alpha1.NetworkReady)
+	}
+	if len(got.ExternalAddresses) == 0 {
+		t.Fatalf("expect external addresses to be set")
+	}
+	if got.ExternalAddresses[0].IP != "1.2.3.4" {
+		t.Fatalf("external IP actual: %q, expect: %q", got.ExternalAddresses[0].IP, "1.2.3.4")
 	}
 }

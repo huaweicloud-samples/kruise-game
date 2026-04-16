@@ -426,7 +426,7 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 			}
 			externalAddress := gamekruiseiov1alpha1.NetworkAddress{
 				EndPoint: endPoints,
-				IP:       "",
+				IP:       ingressIP,
 				Ports: []gamekruiseiov1alpha1.NetworkPort{
 					{
 						Name:     port.Name,
