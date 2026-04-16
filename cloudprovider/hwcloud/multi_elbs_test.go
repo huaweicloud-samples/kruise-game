@@ -17,11 +17,13 @@ limitations under the License.
 package hwcloud
 
 import (
+	"context"
 	"reflect"
 	"sync"
 	"testing"
 
 	gamekruiseiov1alpha1 "github.com/openkruise/kruise-game/apis/v1alpha1"
+	"github.com/openkruise/kruise-game/pkg/util"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -453,5 +455,67 @@ func TestApplyServiceUpdateControlledKeys(t *testing.T) {
 	}
 	if !reflect.DeepEqual(current.Spec.AllocateLoadBalancerNodePorts, desired.Spec.AllocateLoadBalancerNodePorts) {
 		t.Errorf("allocateLoadBalancerNodePorts actual: %v, expect: %v", current.Spec.AllocateLoadBalancerNodePorts, desired.Spec.AllocateLoadBalancerNodePorts)
+	}
+}
+
+func TestConsSvc_UserDefineCannotOverrideControlledKeys(t *testing.T) {
+	plugin := &MultiElbsPlugin{}
+	pod := &corev1.Pod{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "v1",
+			Kind:       "Pod",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "pod-0",
+			UID:       "uid-0",
+		},
+	}
+	podLbsPorts := &lbsPorts{
+		index:      0,
+		lbIds:      []string{"elb-1"},
+		ports:      []int32{8000},
+		targetPort: []int{80},
+		protocols:  []corev1.Protocol{corev1.ProtocolTCP},
+	}
+
+	conf := &multiELBsConfig{
+		lbNames: map[string]string{"elb-1": "pool-a"},
+		idList:  [][]string{{"elb-1"}},
+
+		targetPorts:    []int{80},
+		protocols:      []corev1.Protocol{corev1.ProtocolTCP},
+		isFixed:        false,
+		allocatePolicy: "default",
+		elbClass:       "performance",
+
+		lbHealthCheckFlag:   "on",
+		lbHealthCheckConfig: "",
+
+		userDefine: `{
+			"kubernetes.io/elb.id":"evil-elb",
+			"game.kruise.io/network-config-hash":"evil-hash",
+			"kubernetes.io/elb.health-check-flag":"off",
+			"custom/ok":"1"
+		}`,
+		allocateLoadBalancerNodePorts: true,
+	}
+
+	svc, err := plugin.consSvc(podLbsPorts, conf, pod, "pool-a", nil, context.TODO())
+	if err != nil {
+		t.Fatalf("consSvc error: %v", err)
+	}
+
+	if svc.Annotations[ElbIdAnnotationKey] != "elb-1" {
+		t.Errorf("elb id annotation actual: %v, expect: %v", svc.Annotations[ElbIdAnnotationKey], "elb-1")
+	}
+	if svc.Annotations[ElbConfigHashKey] != util.GetHash(conf) {
+		t.Errorf("config hash actual: %v, expect: %v", svc.Annotations[ElbConfigHashKey], util.GetHash(conf))
+	}
+	if svc.Annotations[ElbHealthCheckFlagAnnotationKey] != "on" {
+		t.Errorf("health check flag actual: %v, expect: %v", svc.Annotations[ElbHealthCheckFlagAnnotationKey], "on")
+	}
+	if svc.Annotations["custom/ok"] != "1" {
+		t.Errorf("custom annotation actual: %v, expect: %v", svc.Annotations["custom/ok"], "1")
 	}
 }

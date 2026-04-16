@@ -70,14 +70,6 @@ const (
 )
 
 var (
-	notAllowedAnnotationKeyMap = map[string]struct{}{
-		ElbAutocreateAnnotationKey:         {},
-		ElbMappingPoolAnnotationKey:        {},
-		ElbClassAnnotationKey:              {},
-		ElbIdAnnotationKey:                 {},
-		ElbHealthCheckOptionsAnnotationKey: {},
-	}
-
 	multiElbsControlledAnnotationKeys = []string{
 		ElbIdAnnotationKey,
 		ElbConfigHashKey,
@@ -88,6 +80,16 @@ var (
 		ElbClassAnnotationKey,
 		ElbPortMappingResultCount,
 	}
+
+	notAllowedAnnotationKeyMap = func() map[string]struct{} {
+		m := map[string]struct{}{
+			ElbAutocreateAnnotationKey: {},
+		}
+		for _, key := range multiElbsControlledAnnotationKeys {
+			m[key] = struct{}{}
+		}
+		return m
+	}()
 )
 
 type MultiElbsPlugin struct {
