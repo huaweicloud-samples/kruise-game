@@ -708,88 +708,84 @@ func processHealthCheckOptions(healthCheckConfig string, podLbsPorts *lbsPorts) 
 	// Update target_service_port based on pod_target_port mapping
 	for i := range healthCheckOptions {
 		podTargetPortStr := healthCheckOptions[i].PodTargetPort
-		if podTargetPortStr == "" {
-			// If there is a target_service_port field, try to use that as fallback
-			if healthCheckOptions[i].TargetServicePort != "" {
-				// This means the original config already used target_service_port, so just map it
-				targetPortStr := healthCheckOptions[i].TargetServicePort
-				parts := strings.Split(targetPortStr, ":")
-				if len(parts) == 2 {
-					protocol := parts[0]
-					portStr := parts[1]
-					podPort, err := strconv.Atoi(portStr)
-					if err != nil {
-						log.Warningf("Invalid port number in target_service_port: %s", portStr)
-						continue
-					}
+		var originalPortStr, protocol string
+		
+		if podTargetPortStr != "" {
+			// Process pod_target_port field
+			parts := strings.Split(podTargetPortStr, ":")
+			if len(parts) != 2 {
+				log.Warningf("Invalid pod_target_port format: %s", podTargetPortStr)
+				continue
+			}
+			protocol = parts[0]
+			originalPortStr = parts[1]
+		} else if healthCheckOptions[i].TargetServicePort != "" {
+			// Process existing target_service_port field as fallback
+			targetPortStr := healthCheckOptions[i].TargetServicePort
+			parts := strings.Split(targetPortStr, ":")
+			if len(parts) != 2 {
+				log.Warningf("Invalid target_service_port format: %s", targetPortStr)
+				continue
+			}
+			protocol = parts[0]
+			originalPortStr = parts[1]
+		} else {
+			// No port configuration found
+			continue
+		}
+		
+		// Convert the port part to integer to match with pod ports
+		podPort, err := strconv.Atoi(originalPortStr)
+		if err != nil {
+			log.Warningf("Invalid port number in port specification: %s", originalPortStr)
+			continue
+		}
 
-					found := false
-					for j, targetPodPort := range podLbsPorts.targetPort {
-						if targetPodPort == podPort {
-							servicePort := podLbsPorts.ports[j]
-							healthCheckOptions[i].TargetServicePort = fmt.Sprintf("%s:%d", protocol, servicePort)
-							found = true
-							break
-						}
-					}
-
-					if !found && podPort > 0 && podPort <= len(podLbsPorts.targetPort) {
-						servicePort := podLbsPorts.ports[podPort-1]
-						healthCheckOptions[i].TargetServicePort = fmt.Sprintf("%s:%d", protocol, servicePort)
-						found = true
-					}
-
-					if !found {
-						log.Warningf("Could not find matching service port for target_service_port: %s", targetPortStr)
-					}
+		// Look for the corresponding service port based on the pod port and protocol
+		found := false
+		
+		// First, look for exact pod port and protocol match
+		for j, targetPodPort := range podLbsPorts.targetPort {
+			if targetPodPort == podPort && j < len(podLbsPorts.protocols) {
+				serviceProtocol := strings.ToUpper(string(podLbsPorts.protocols[j]))
+				
+				// Handle TCPUDP protocol case
+				if serviceProtocol == "TCPUDP" {
+					// For TCPUDP, the same service port can handle both TCP and UDP protocols
+					servicePort := podLbsPorts.ports[j]
+					// Set the target_service_port to use the actual service port
+					healthCheckOptions[i].TargetServicePort = fmt.Sprintf("%s:%d", protocol, servicePort)
+					// Clear the pod_target_port as it's not needed in the service annotation
+					healthCheckOptions[i].PodTargetPort = ""
+					found = true
+					break
+				} else if serviceProtocol == protocol {
+					// Exact protocol match
+					servicePort := podLbsPorts.ports[j]
+					// Set the target_service_port to use the actual service port
+					healthCheckOptions[i].TargetServicePort = fmt.Sprintf("%s:%d", protocol, servicePort)
+					// Clear the pod_target_port as it's not needed in the service annotation
+					healthCheckOptions[i].PodTargetPort = ""
+					found = true
+					break
 				}
 			}
-			continue // Skip if no pod target port is specified
 		}
 
-		// Parse the pod target port string in format like "TCP:1"
-		parts := strings.Split(podTargetPortStr, ":")
-		if len(parts) != 2 {
-			log.Warningf("Invalid pod_target_port format: %s", podTargetPortStr)
-			continue
-		}
-
-		protocol := parts[0]
-		portStr := parts[1]
-
-		// Convert the port part to integer to match with pod ports
-		podPort, err := strconv.Atoi(portStr)
-		if err != nil {
-			log.Warningf("Invalid port number in pod_target_port: %s", portStr)
-			continue
-		}
-
-		// Look for the corresponding service port based on the pod port
-		found := false
-		for j, targetPodPort := range podLbsPorts.targetPort {
-			if targetPodPort == podPort {
-				servicePort := podLbsPorts.ports[j]
-				// Set the target_service_port to use the actual service port
-				healthCheckOptions[i].TargetServicePort = fmt.Sprintf("%s:%d", protocol, servicePort)
-				// Clear the pod_target_port as it's not needed in the service annotation
-				healthCheckOptions[i].PodTargetPort = ""
-				found = true
-				break
-			}
-		}
-
-		// If not found by exact pod port match, try to interpret the port as an index (e.g., "1" meaning first port)
+		// If no exact match found, try index-based mapping as fallback
 		if !found && podPort > 0 && podPort <= len(podLbsPorts.targetPort) {
 			// Use the port as 1-based index to select service port
 			servicePort := podLbsPorts.ports[podPort-1]
 			healthCheckOptions[i].TargetServicePort = fmt.Sprintf("%s:%d", protocol, servicePort)
 			// Clear the pod_target_port as it's not needed in the service annotation
-			healthCheckOptions[i].PodTargetPort = ""
+			if podTargetPortStr != "" {
+				healthCheckOptions[i].PodTargetPort = ""
+			}
 			found = true
 		}
 
 		if !found {
-			log.Warningf("Could not find matching service port for pod_target_port: %s", podTargetPortStr)
+			log.Warningf("Could not find matching service port for port: %s", podTargetPortStr)
 		}
 	}
 
