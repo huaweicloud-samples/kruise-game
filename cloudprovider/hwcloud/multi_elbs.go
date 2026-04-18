@@ -216,7 +216,7 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 		return pod, cperrors.ToPluginError(err, cperrors.ParameterError)
 	}
 
-	// 收集需要更新的Service
+	// Collect services that need to be updated
 	var servicesToUpdate []*corev1.Service
 	var servicesToCreate []*corev1.Service
 	var needNetworkNotReady bool
@@ -246,7 +246,7 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 				return pod, nil
 			}
 
-			// 检查是否需要更新配置
+			// Check if configuration update is needed
 			if util.GetHash(conf) != svc.GetAnnotations()[ElbConfigHashKey] {
 				needNetworkNotReady = true
 				service, err := m.consSvc(podLbsPorts, conf, pod, lbName, c, ctx)
@@ -258,7 +258,7 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 		}
 	}
 
-	// 先创建所有需要创建的Service
+	// Create all services that need to be created first
 	for _, service := range servicesToCreate {
 		err = c.Create(ctx, service)
 		if err != nil {
@@ -266,7 +266,7 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 		}
 	}
 
-	// 更新所有需要更新的Service
+	// Update all services that need to be updated
 	for _, service := range servicesToUpdate {
 		err = c.Update(ctx, service)
 		if err != nil {
@@ -274,7 +274,7 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 		}
 	}
 
-	// 如果有Service被更新或创建，说明网络配置发生变化，需要设置网络为NotReady状态
+	// If services were updated or created, network configuration has changed, need to set network to NotReady state
 	if len(servicesToUpdate) > 0 || len(servicesToCreate) > 0 {
 		if needNetworkNotReady && networkStatus != nil {
 			networkStatus.CurrentNetworkState = gamekruiseiov1alpha1.NetworkNotReady
@@ -283,11 +283,11 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 				return pod, cperrors.NewPluginError(cperrors.InternalError, err.Error())
 			}
 		}
-		// 返回，等待下一次reconcile
+		// Return, wait for next reconcile
 		return pod, nil
 	}
 
-	// 处理剩余的未更新Service的状态检查
+	// Process status check for remaining un-updated services
 	endPoints := ""
 	for i, lbId := range conf.idList[podLbsPorts.index] {
 		lbName := conf.lbNames[lbId]
@@ -340,7 +340,7 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 			if toUpDateSvc {
 				err := c.Update(ctx, svc)
 				if err != nil {
-					return pod, cperrors.ToPluginError(err, cperrors.ApiCallError)
+					return pod, cperrors.ToPluginError(err, cperrors.InternalError)
 				}
 			}
 		}
@@ -489,7 +489,6 @@ func (m *MultiElbsPlugin) consSvc(podLbsPorts *lbsPorts, conf *multiELBsConfig, 
 		}
 	}
 
-	log.Infof("%v服务的elb id:%v", pod.GetName()+"-"+strings.ToLower(lbName), selectId)
 	svcAnnotations := map[string]string{
 		ElbIdAnnotationKey:              selectId,
 		ElbConfigHashKey:                util.GetHash(conf),
@@ -506,7 +505,6 @@ func (m *MultiElbsPlugin) consSvc(podLbsPorts *lbsPorts, conf *multiELBsConfig, 
 		for k, v := range hwOptions {
 			if _, exists := notAllowedAnnotationKeyMap[k]; !exists {
 				svcAnnotations[k] = v
-				log.Infof("添加注解%v:%v", k, v)
 			} else {
 				log.Warningf("[%s] not allowed annotation key %s in UserDefine", MultiElbsNetwork, k)
 			}
