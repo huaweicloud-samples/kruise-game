@@ -46,6 +46,8 @@ const (
 
 	CCEElbNetwork = "HwCloud-CCE-ELB"
 	AliasCCEELB   = "CCE-ELB-Network"
+
+	ElbMappingPoolAnnotationKey = "kubernetes.io/elb.mapping.pool"
 )
 
 func init() {
@@ -488,10 +490,7 @@ func (s *CCEElbPlugin) consSvc(sc *cceElbConfig, pod *corev1.Pod, c client.Clien
 			})
 		}
 	}
-	svcAnnotations := make(map[string]string, 0)
-	for k, v := range sc.hwOptions {
-		svcAnnotations[k] = v
-	}
+	svcAnnotations, loadbalancerIP := convertOptionToAnnotation(sc.hwOptions)
 	// add hash to svc, otherwise, the status of GS will remain in NetworkNotReady.
 	svcAnnotations[ElbConfigHashKey] = util.GetHash(sc)
 	svc := &corev1.Service{
@@ -509,6 +508,9 @@ func (s *CCEElbPlugin) consSvc(sc *cceElbConfig, pod *corev1.Pod, c client.Clien
 			},
 			Ports: svcPorts,
 		},
+	}
+	if loadbalancerIP != "" {
+		svc.Spec.LoadBalancerIP = loadbalancerIP
 	}
 	return svc, nil
 }
@@ -675,4 +677,21 @@ func parseCCELbConfig(conf []gamekruiseiov1alpha1.NetworkConfParams) (*cceElbCon
 		}
 	}
 	return res, nil
+}
+
+func convertOptionToAnnotation(options map[string]string) (map[string]string, string) {
+	res := make(map[string]string)
+	for k, v := range options {
+		res[k] = v
+	}
+	// 使用已有的独占类型的elb的时候, 且提供了kubernetes.io/elb.id, 那么就用kubernetes.io/elb.id来对接
+	// 因为华为CCE在这种场景下, 会让svc的spec.loadBalancerIP为内部ip, 我们希望他为外部ip
+	loadbalancerIP := options["kubernetes.io/elb.loadbalancer.ip"]
+	useSpecLoadbalancerIP := options["kubernetes.io/elb.id"] != "" && loadbalancerIP != "" && options["kubernetes.io/elb.class"] == "performance"
+	if useSpecLoadbalancerIP {
+		delete(res, "kubernetes.io/elb.id")
+	} else {
+		loadbalancerIP = ""
+	}
+	return res, loadbalancerIP
 }
