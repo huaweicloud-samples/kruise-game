@@ -56,9 +56,7 @@ const (
 
 	PrefixReadyReadinessGate = "target-health.elb.k8s.cce/"
 
-	PublicIPSetAnnotationKey = "game.kruise.io/lb-public-ip-set"
-
-	ElbMappingPoolAnnotationKey = "kubernetes.io/elb.mapping.pool"
+	ElbMappingPoolAnnotationKey = "cce.io/game.kruise.isp-name"
 
 	ElbHealthCheckFlagAnnotationKey = "kubernetes.io/elb.health-check-flag"
 	ElbHealthCheckFlagConfigName    = "LBHealthCheckFlag"
@@ -401,9 +399,6 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 		host := svc.Status.LoadBalancer.Ingress[0].Hostname
 		if host == "" {
 			host = ingressIP
-		}
-		if svc.GetAnnotations()[PublicIPSetAnnotationKey] == "true" {
-			host = svc.Spec.LoadBalancerIP
 		}
 		endPoints = endPoints + host + "/" + lbName
 		//log.V(5).Info(endPoints)
