@@ -106,7 +106,7 @@ func (s *CCEElbPlugin) Alias() string {
 func (s *CCEElbPlugin) Init(c client.Client, options cloudprovider.CloudProviderOptions, ctx context.Context) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	elbOptions := options.(provideroptions.HwCloudOptions).CCEELBOptions
+	elbOptions := options.(provideroptions.HwCloudOptions).CCEELBOptions.ELBOptions
 	s.minPort = elbOptions.MinPort
 	s.maxPort = elbOptions.MaxPort
 	s.blockPorts = elbOptions.BlockPorts
