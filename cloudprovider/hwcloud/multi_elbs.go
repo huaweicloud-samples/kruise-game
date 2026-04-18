@@ -68,6 +68,8 @@ const (
 	ElbHealthCheckOptionAnnotationKey  = "kubernetes.io/elb.health-check-option"
 	ElbHealthCheckOptionsAnnotationKey = "kubernetes.io/elb.health-check-options"
 	ElbHealthCheckOptionsConfigName    = "LBHealthCheckConfig"
+
+	ElbPortMappingResultCount = "cce.io/game.kruise.mapping-result-count"
 )
 
 var (
@@ -517,7 +519,7 @@ func (m *MultiElbsPlugin) consSvc(podLbsPorts *lbsPorts, conf *multiELBsConfig, 
 			break
 		}
 	}
-
+	portProtocolNum := 0
 	svcPorts := make([]corev1.ServicePort, 0)
 	for i := 0; i < len(podLbsPorts.ports); i++ {
 		if podLbsPorts.protocols[i] == ProtocolTCPUDP {
@@ -533,6 +535,7 @@ func (m *MultiElbsPlugin) consSvc(podLbsPorts *lbsPorts, conf *multiELBsConfig, 
 				TargetPort: intstr.FromInt(podLbsPorts.targetPort[i]),
 				Protocol:   corev1.ProtocolUDP,
 			})
+			portProtocolNum += 2
 		} else {
 			svcPorts = append(svcPorts, corev1.ServicePort{
 				Name:       strconv.Itoa(podLbsPorts.targetPort[i]) + "-" + strings.ToLower(string(podLbsPorts.protocols[i])),
@@ -540,6 +543,7 @@ func (m *MultiElbsPlugin) consSvc(podLbsPorts *lbsPorts, conf *multiELBsConfig, 
 				TargetPort: intstr.FromInt(podLbsPorts.targetPort[i]),
 				Protocol:   podLbsPorts.protocols[i],
 			})
+			portProtocolNum += 1
 		}
 	}
 
@@ -557,6 +561,7 @@ func (m *MultiElbsPlugin) consSvc(podLbsPorts *lbsPorts, conf *multiELBsConfig, 
 	svcAnnotations[LBIDBelongIndexKey] = strconv.Itoa(podLbsPorts.index)
 	svcAnnotations[ElbMappingPoolAnnotationKey] = lbName
 	svcAnnotations[ElbClassAnnotationKey] = conf.elbClass
+	svcAnnotations[ElbPortMappingResultCount] = strconv.Itoa(len(podLbsPorts.lbIds) * portProtocolNum)
 
 	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
