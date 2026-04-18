@@ -1,0 +1,45 @@
+apiVersion: game.kruise.io/v1alpha1
+kind: GameServerSet
+metadata:
+  name: example-0903x
+  namespace: kruise-game-system
+spec:
+  replicas: 1
+  updateStrategy:
+    rollingUpdate:
+      podUpdatePolicy: InPlaceIfPossible
+  network:
+    networkType: HwCloud-CCE-ELB
+    networkConf:
+      - name: PortProtocols
+        value: "80/TCPUDP"
+      - name: kubernetes.io/elb.class
+        value: performance
+#      - name: kubernetes.io/elb.id
+#        value: 4d873946-156b-44b2-a9fd-31de3d5f050b
+      - name: ElbIds
+        value: 4d873946-156b-44b2-a9fd-31de3d5f050b/cmcc/94.74.121.93, 10caa50c-3239-41c9-8cfd-83ccfb0c601f/cucc/159.138.135.81
+      - name: kubernetes.io/elb.enable.scatter
+        value: "true"
+  gameServerTemplate:
+    spec:
+      containers:
+        - image: nginx
+          name: nginx
+          ports:
+            - containerPort: 80
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          volumeMounts:
+            - name: nginx-html
+              mountPath: /usr/share/nginx/html
+          lifecycle:
+            postStart:
+              exec:
+                command: [ "/bin/sh", "-c", "echo \"<html><body><h1>Welcome to $POD_NAME</h1></body></html>\" > /usr/share/nginx/html/index.html" ]
+      volumes:
+        - name: nginx-html
+          emptyDir: { }

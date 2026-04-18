@@ -48,7 +48,17 @@ const (
 	AliasCCEELB   = "CCE-ELB-Network"
 
 	ElbMappingPoolAnnotationKey = "kubernetes.io/elb.mapping.pool"
+	EnableCCEScatterConfigName  = "kubernetes.io/elb.enable.scatter"
 )
+
+var (
+	elbIpAndOperatorMap = make(map[string]ipAndOperator)
+)
+
+type ipAndOperator struct {
+	loadBalancerIp string
+	operator       string // 运营商
+}
 
 func init() {
 	elbPlugin := CCEElbPlugin{
@@ -64,6 +74,7 @@ type cceElbConfig struct {
 	isFixed                   bool
 	externalTrafficPolicyType corev1.ServiceExternalTrafficPolicyType
 	hwOptions                 map[string]string
+	enableCCEScatter          bool
 }
 
 func (e cceElbConfig) isAutoCreateElb() bool {
@@ -75,12 +86,13 @@ func (e cceElbConfig) isAutoCreateElb() bool {
 type ccePortAllocated map[int32]bool
 
 type CCEElbPlugin struct {
-	maxPort     int32
-	minPort     int32
-	blockPorts  []int32
-	cache       map[string]ccePortAllocated
-	podAllocate map[string]string
-	mutex       sync.RWMutex
+	maxPort        int32
+	minPort        int32
+	blockPorts     []int32
+	cache          map[string]ccePortAllocated
+	podAllocate    map[string]string
+	mutex          sync.RWMutex
+	lastScatterIdx int
 }
 
 func (s *CCEElbPlugin) Name() string {
@@ -379,46 +391,103 @@ func (s *CCEElbPlugin) OnPodDeleted(c client.Client, pod *corev1.Pod, ctx contex
 	return nil
 }
 
-func (s *CCEElbPlugin) allocate(lbIds []string, num int, podKey string) (string, []int32) {
+func (s *CCEElbPlugin) allocate(lbIds []string, num int, podKey string, enableScatter bool) (string, []int32, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
 	var ports []int32
 	var lbId string
-
-	// find lb with adequate ports
-	for _, elbId := range lbIds {
-		sum := 0
-		for i := s.minPort; i <= s.maxPort; i++ {
-			if !s.cache[elbId][i] {
-				sum++
+	useScatter := enableScatter && len(lbIds) > 0
+	if useScatter {
+		// 轮询分配
+		startIdx := s.lastScatterIdx % len(lbIds)
+		for i := 0; i < len(lbIds); i++ {
+			idx := (startIdx + i) % len(lbIds)
+			clbId := lbIds[idx]
+			if s.cache[clbId] == nil {
+				// we assume that an empty cache is allways allocatable
+				s.newCacheForSingleLb(clbId)
+				lbId = clbId
+				s.lastScatterIdx = idx + 1 // 下次从下一个开始
+				break
 			}
-			if sum >= num {
-				lbId = elbId
+			sum := 0
+			for p := s.minPort; p < s.maxPort; p++ {
+				if !s.cache[clbId][p] {
+					sum++
+				}
+				if sum >= num {
+					lbId = clbId
+					s.lastScatterIdx = idx + 1 // 下次从下一个开始
+					break
+				}
+			}
+			if lbId != "" {
+				break
+			}
+		}
+	} else {
+		log.V(4).Infof("[CLB] scatter disabled, use default order")
+		// 原有逻辑
+		for _, clbId := range lbIds {
+			if s.cache[clbId] == nil {
+				s.newCacheForSingleLb(clbId)
+				lbId = clbId
+				break
+			}
+			sum := 0
+			for i := s.minPort; i < s.maxPort; i++ {
+				if !s.cache[clbId][i] {
+					sum++
+				}
+				if sum >= num {
+					lbId = clbId
+					break
+				}
+			}
+			if lbId != "" {
 				break
 			}
 		}
 	}
+
 	if lbId == "" {
-		return "", nil
+		return "", nil, fmt.Errorf("unable to find load balancer with %d available ports", num)
+	}
+	// Find available ports sequentially
+	portCount := 0
+	for port := s.minPort; port < s.maxPort && portCount < num; port++ {
+		if !s.cache[lbId][port] {
+			s.cache[lbId][port] = true
+			ports = append(ports, port)
+			portCount++
+		}
 	}
 
-	// select ports
-	for i := 0; i < num; i++ {
-		var port int32
-		s.fillCache(lbId, nil)
-		for p, allocated := range s.cache[lbId] {
-			if !allocated {
-				port = p
-				break
-			}
+	// Check if we found enough ports
+	if len(ports) < num {
+		// Rollback: release allocated ports
+		for _, port := range ports {
+			s.cache[lbId][port] = false
 		}
-		s.cache[lbId][port] = true
-		ports = append(ports, port)
+		return "", nil, fmt.Errorf("insufficient available ports on load balancer %s: found %d, need %d", lbId, len(ports), num)
 	}
 	s.podAllocate[podKey] = newPodAllocateValue(lbId, ports)
 	log.Infof("pod %s allocate elb %s ports %v", podKey, lbId, ports)
-	return lbId, ports
+	return lbId, ports, nil
+}
+
+func (s *CCEElbPlugin) newCacheForSingleLb(lbId string) {
+	if s.cache[lbId] == nil {
+		s.cache[lbId] = make(ccePortAllocated, s.maxPort-s.minPort+1)
+		for i := s.minPort; i <= s.maxPort; i++ {
+			s.cache[lbId][i] = false
+		}
+		// block ports
+		for _, blockPort := range s.blockPorts {
+			s.cache[lbId][blockPort] = true
+		}
+	}
 }
 
 func (s *CCEElbPlugin) deAllocate(nsSvcKey string) {
@@ -448,6 +517,7 @@ func (s *CCEElbPlugin) deAllocate(nsSvcKey string) {
 func (s *CCEElbPlugin) consSvc(sc *cceElbConfig, pod *corev1.Pod, c client.Client, ctx context.Context) (*corev1.Service, error) {
 	var ports []int32
 	var lbId string
+	var err error
 	podKey := pod.GetNamespace() + "/" + pod.GetName()
 	allocatedPorts, exist := s.podAllocate[podKey]
 	if exist {
@@ -457,7 +527,11 @@ func (s *CCEElbPlugin) consSvc(sc *cceElbConfig, pod *corev1.Pod, c client.Clien
 		if sc.isAutoCreateElb() {
 			lbId, ports = "", s.getPortFromHead(len(sc.targetPorts))
 		} else {
-			lbId, ports = s.allocate(sc.elbIds, len(sc.targetPorts), podKey)
+			lbId, ports, err = s.allocate(sc.elbIds, len(sc.targetPorts), podKey, sc.enableCCEScatter)
+			if err != nil {
+				log.Errorf("pod %s allocate cce failed: %v", podKey, err)
+				return nil, err
+			}
 		}
 		if lbId == "" && ports == nil {
 			return nil, fmt.Errorf("there are no avaliable ports for %v", sc.elbIds)
@@ -490,9 +564,10 @@ func (s *CCEElbPlugin) consSvc(sc *cceElbConfig, pod *corev1.Pod, c client.Clien
 			})
 		}
 	}
-	svcAnnotations, loadbalancerIP := convertOptionToAnnotation(sc.hwOptions)
+	svcAnnotations, loadbalancerIP := convertOptionToAnnotation(sc.hwOptions, lbId)
 	// add hash to svc, otherwise, the status of GS will remain in NetworkNotReady.
 	svcAnnotations[ElbConfigHashKey] = util.GetHash(sc)
+	svcAnnotations[ElbMappingPoolAnnotationKey] = elbIpAndOperatorMap[lbId].operator
 	svc := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            pod.GetName(),
@@ -627,6 +702,7 @@ func parseCCELbConfig(conf []gamekruiseiov1alpha1.NetworkConfParams) (*cceElbCon
 	}
 	specifyElbId := false
 	autoCreateElb := false
+	//multipleElbIds := false
 	for _, c := range conf {
 		switch c.Name {
 		case ElbIdAnnotationKey:
@@ -634,8 +710,12 @@ func parseCCELbConfig(conf []gamekruiseiov1alpha1.NetworkConfParams) (*cceElbCon
 				return nil, fmt.Errorf("%s and %s cannot be filled in simultaneously",
 					ElbIdAnnotationKey, ElbAutocreateAnnotationKey)
 			}
+			//if multipleElbIds {
+			//	return nil, fmt.Errorf("%s and %s cannot be filled in simultaneously",
+			//		ElbIdAnnotationKey, ElbIdsConfigName)
+			//}
 			specifyElbId = true
-			// huawei only supports one elb id
+			// huawei only supports one elb id, if use multiple elb ids, use ElbIdsConfigName
 			if c.Value == "" {
 				return nil, fmt.Errorf("no elb id found, must specify at least one elb id")
 			}
@@ -672,6 +752,22 @@ func parseCCELbConfig(conf []gamekruiseiov1alpha1.NetworkConfParams) (*cceElbCon
 			if strings.EqualFold(c.Value, string(corev1.ServiceExternalTrafficPolicyTypeLocal)) {
 				res.externalTrafficPolicyType = corev1.ServiceExternalTrafficPolicyTypeLocal
 			}
+		case EnableCCEScatterConfigName:
+			v, err := strconv.ParseBool(c.Value)
+			if err == nil {
+				res.enableCCEScatter = v // ||| 这个没什么用
+			}
+		case ElbIdsConfigName:
+			//if specifyElbId {
+			//	return nil, fmt.Errorf("%s and %s cannot be filled in simultaneously",
+			//		ElbIdAnnotationKey, ElbIdsConfigName)
+			//}
+			if c.Value == "" {
+				return nil, fmt.Errorf("the value of %s is empty, should be: 'elbID1/opeator1/ip1, elbID2/opeator2/ip2'", ElbIdsConfigName)
+			}
+			res.hwOptions[c.Name] = c.Value
+			elbIpAndOperatorMap, res.elbIds = getElbIpAndOperatorMap(c.Value)
+			//multipleElbIds = true
 		default:
 			res.hwOptions[c.Name] = c.Value
 		}
@@ -679,19 +775,47 @@ func parseCCELbConfig(conf []gamekruiseiov1alpha1.NetworkConfParams) (*cceElbCon
 	return res, nil
 }
 
-func convertOptionToAnnotation(options map[string]string) (map[string]string, string) {
+func convertOptionToAnnotation(options map[string]string, elbId string) (map[string]string, string) {
 	res := make(map[string]string)
 	for k, v := range options {
 		res[k] = v
 	}
-	// 使用已有的独占类型的elb的时候, 且提供了kubernetes.io/elb.id, 那么就用kubernetes.io/elb.id来对接
-	// 因为华为CCE在这种场景下, 会让svc的spec.loadBalancerIP为内部ip, 我们希望他为外部ip
-	loadbalancerIP := options["kubernetes.io/elb.loadbalancer.ip"]
-	useSpecLoadbalancerIP := options["kubernetes.io/elb.id"] != "" && loadbalancerIP != "" && options["kubernetes.io/elb.class"] == "performance"
-	if useSpecLoadbalancerIP {
-		delete(res, "kubernetes.io/elb.id")
+	loadbalancerIP := ""
+	if options[ElbIdsConfigName] != "" && elbId != "" {
+		delete(res, ElbIdsConfigName)
+		return res, elbIpAndOperatorMap[elbId].loadBalancerIp
 	} else {
-		loadbalancerIP = ""
+		// 使用已有的独占类型的elb的时候, 且提供了kubernetes.io/elb.id, spec.loadbalancerIP来对接ELB
+		// 因为华为CCE在这种场景下, 会让svc的spec.loadBalancerIP为内部ip, 我们希望他为外部ip, 这是使用单个elb id的情况
+		loadbalancerIP := options["kubernetes.io/elb.loadbalancer.ip"]
+		useSpecLoadbalancerIP := options["kubernetes.io/elb.id"] != "" && loadbalancerIP != "" && options["kubernetes.io/elb.class"] == "performance"
+		if useSpecLoadbalancerIP {
+			delete(res, "kubernetes.io/elb.id")
+		} else {
+			loadbalancerIP = ""
+		}
 	}
+
 	return res, loadbalancerIP
+}
+
+func getElbIpAndOperatorMap(s string) (map[string]ipAndOperator, []string) {
+	resMap := make(map[string]ipAndOperator)
+	resSlice := make([]string, 0)
+	s = strings.TrimSpace(s)
+	items := strings.Split(s, ",")
+	for _, item := range items {
+		segs := strings.Split(strings.TrimSpace(item), "/")
+		// elbid/operator/ip, elbid/operator/ip
+		if len(segs) != 3 {
+			log.Warningf("%s is not right, should be: 'elbid/ip/operator'", segs)
+			continue
+		}
+		resMap[strings.TrimSpace(segs[0])] = ipAndOperator{
+			operator:       strings.TrimSpace(segs[1]),
+			loadBalancerIp: strings.TrimSpace(segs[2]),
+		}
+		resSlice = append(resSlice, strings.TrimSpace(segs[0]))
+	}
+	return resMap, resSlice
 }
