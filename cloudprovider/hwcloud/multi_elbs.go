@@ -85,9 +85,8 @@ type MultiElbsPlugin struct {
 	blockPorts []int32
 	cache      [][]bool
 	// podAllocate format {pod ns/name}: -{lbId: xxx-a, port: -8001 -8002} -{lbId: xxx-b, port: -8001 -8002}
-	podAllocate    map[string]*lbsPorts
-	mutex          sync.RWMutex
-	reconcileCount int64
+	podAllocate map[string]*lbsPorts
+	mutex       sync.RWMutex
 }
 
 type lbsPorts struct {
@@ -529,10 +528,58 @@ func (m *MultiElbsPlugin) allocate(conf *multiELBsConfig, nsName string) (*lbsPo
 
 	// check if pod is already allocated
 	if m.podAllocate[nsName] != nil {
-		return m.podAllocate[nsName], nil
+		existingLbs := m.podAllocate[nsName]
+
+		// Check if configuration has changed and requires reallocation
+		// This happens when new ELBs are added to the configuration
+		if existingLbs.index < len(conf.idList) {
+			// Check if the allocation matches the new configuration
+			existingLbIdsMap := make(map[string]struct{})
+			for _, id := range existingLbs.lbIds {
+				existingLbIdsMap[id] = struct{}{}
+			}
+			
+			configLbIdsMap := make(map[string]struct{})
+			for _, id := range conf.idList[existingLbs.index] {
+				configLbIdsMap[id] = struct{}{}
+			}
+			
+			// Determine if re-allocation is needed
+			needsReallocation := false
+			if len(existingLbs.lbIds) != len(conf.idList[existingLbs.index]) {
+				// Different number of ELBs - needs reallocation
+				needsReallocation = true
+			} else {
+				// Check if all config ELBs exist in current allocation
+				for configLbId := range configLbIdsMap {
+					if _, exists := existingLbIdsMap[configLbId]; !exists {
+						needsReallocation = true
+						break
+					}
+				}
+			}
+
+			if needsReallocation {
+				// Deallocate current allocation
+				for _, port := range existingLbs.ports {
+					m.cache[existingLbs.index][port-m.minPort] = false
+				}
+				delete(m.podAllocate, nsName)
+			} else {
+				// Allocation is still valid
+				return m.podAllocate[nsName], nil
+			}
+		} else {
+			// Index out of bounds for new configuration - reallocate
+			// Deallocate current allocation
+			for _, port := range existingLbs.ports {
+				m.cache[existingLbs.index][port-m.minPort] = false
+			}
+			delete(m.podAllocate, nsName)
+		}
 	}
 
-	// if the pod has not been allocated, allocate new ports to it
+	// if the pod has not been allocated or was just deallocated due to config change, allocate new ports to it
 	var ports []int32
 	needNum := len(conf.targetPorts)
 	index := -1
