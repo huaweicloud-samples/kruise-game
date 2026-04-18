@@ -204,38 +204,35 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 	//	log.Infof("Pod 状态: %s", string(podJSON))
 	//}
 	seq := atomic.AddInt64(&m.reconcileCount, 1)
-	log.Infof("podname:%s ", pod.Name)
-	log.Infof("OnPodUpdated调用次数:%v", seq)
+	log.V(5).Infof("podname:%s ", pod.Name)
+	log.V(5).Infof("OnPodUpdated调用次数:%v", seq)
 	networkManager := utils.NewNetworkManager(pod, c)
 
 	networkStatus, _ := networkManager.GetNetworkStatus()
 	networkConfig := networkManager.GetNetworkConfig()
 	if networkStatus == nil {
-		log.Infof("podname:%s ", pod.Name)
-		log.Infof("networkStatus为空，返回")
+		log.V(5).Infof("podname:%s ", pod.Name)
+		log.V(5).Infof("networkStatus为空，返回")
 		pod, err := networkManager.UpdateNetworkStatus(gamekruiseiov1alpha1.NetworkStatus{
 			CurrentNetworkState: gamekruiseiov1alpha1.NetworkNotReady,
 		}, pod)
 		return pod, cperrors.ToPluginError(err, cperrors.InternalError)
 	}
 
-	start := time.Now()
 	conf, err := parseMultiELBsConfig(networkConfig)
-	elapsed := time.Since(start)
-	log.Infof("parseMultiELBsConfig 耗时: %v", elapsed)
 	if err != nil {
 		return pod, cperrors.NewPluginError(cperrors.ParameterError, err.Error())
 	}
 
 	podNsName := pod.GetNamespace() + "/" + pod.GetName()
-	start = time.Now()
+	start := time.Now()
 	podLbsPorts, err := m.allocate(conf, podNsName)
-	elapsed = time.Since(start)
-	log.Infof("allocate 耗时: %v", elapsed)
+	elapsed := time.Since(start)
+	log.V(5).Infof("allocate 耗时: %v", elapsed)
 
-	log.Infof("长度:%v,索引:%v", len(conf.idList), podLbsPorts.index)
+	log.V(5).Infof("长度:%v,索引:%v", len(conf.idList), podLbsPorts.index)
 	for i := 0; i < len(conf.idList); i++ {
-		log.Infof("idlist: %s", conf.idList[i])
+		log.V(5).Infof("idlist: %s", conf.idList[i])
 	}
 	if err != nil {
 		return pod, cperrors.ToPluginError(err, cperrors.ParameterError)
@@ -250,15 +247,11 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 			Namespace: pod.GetNamespace(),
 		}, svc)
 		if err != nil {
-			//log.Info("get service 1 返回")
 			if errors.IsNotFound(err) {
-				start := time.Now()
 				service, err := m.consSvc(podLbsPorts, conf, pod, lbName, c, ctx)
-				elapsed := time.Since(start)
-				log.Infof("consSvc 耗时: %v", elapsed)
-				log.Infof("podname:%s ", pod.Name)
-				log.Infof("create service 1")
-				log.Infof("服务名：%v", service.Name)
+				log.V(5).Infof("podname:%s ", pod.Name)
+				log.V(5).Infof("create service 1")
+				log.V(5).Infof("服务名：%v", service.Name)
 				if err != nil {
 					return pod, cperrors.ToPluginError(err, cperrors.ParameterError)
 				}
@@ -272,12 +265,12 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 			return pod, cperrors.NewPluginError(cperrors.ApiCallError, err.Error())
 		}
 	}
-	log.Info("测试第二次循环时间，开始")
+	log.V(5).Info("测试第二次循环时间，开始")
 	endPoints := ""
 	for i, lbId := range conf.idList[podLbsPorts.index] {
-		log.Infof("podname:%s ", pod.Name)
-		log.Infof("内部遍历第%v次", i+1)
-		log.Infof("当前idlist: %s", conf.idList[podLbsPorts.index])
+		log.V(5).Infof("podname:%s ", pod.Name)
+		log.V(5).Infof("内部遍历第%v次", i+1)
+		log.V(5).Infof("当前idlist: %s", conf.idList[podLbsPorts.index])
 		// get svc
 		lbName := conf.lbNames[lbId]
 		svc := &corev1.Service{}
@@ -286,11 +279,11 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 			Namespace: pod.GetNamespace(),
 		}, svc)
 		if err != nil {
-			log.Infof("podname:%s ", pod.Name)
-			log.Info("get service 2 返回")
+			log.V(5).Infof("podname:%s ", pod.Name)
+			log.V(5).Info("get service 2 返回")
 			if errors.IsNotFound(err) {
 				service, err := m.consSvc(podLbsPorts, conf, pod, lbName, c, ctx)
-				log.Info("create service 2")
+				log.V(5).Info("create service 2")
 				if err != nil {
 					return pod, cperrors.ToPluginError(err, cperrors.ParameterError)
 				}
@@ -307,8 +300,8 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 
 		// update svc
 		if util.GetHash(conf) != svc.GetAnnotations()[ElbConfigHashKey] {
-			log.Infof("podname:%s ", pod.Name)
-			log.Info("update service 返回")
+			log.V(5).Infof("podname:%s ", pod.Name)
+			log.V(5).Info("update service 返回")
 			networkStatus.CurrentNetworkState = gamekruiseiov1alpha1.NetworkNotReady
 			pod, err = networkManager.UpdateNetworkStatus(*networkStatus, pod)
 			if err != nil {
@@ -323,24 +316,24 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 
 		// disable network
 		if networkManager.GetNetworkDisabled() && svc.Spec.Type == corev1.ServiceTypeLoadBalancer {
-			log.Infof("podname:%s ", pod.Name)
-			log.Info("disable network 返回")
+			log.V(5).Infof("podname:%s ", pod.Name)
+			log.V(5).Info("disable network 返回")
 			svc.Spec.Type = corev1.ServiceTypeClusterIP
 			return pod, cperrors.ToPluginError(c.Update(ctx, svc), cperrors.ApiCallError)
 		}
 
 		// enable network
 		if !networkManager.GetNetworkDisabled() && svc.Spec.Type == corev1.ServiceTypeClusterIP {
-			log.Infof("podname:%s ", pod.Name)
-			log.Info("enable network 返回")
+			log.V(5).Infof("podname:%s ", pod.Name)
+			log.V(5).Info("enable network 返回")
 			svc.Spec.Type = corev1.ServiceTypeLoadBalancer
 			return pod, cperrors.ToPluginError(c.Update(ctx, svc), cperrors.ApiCallError)
 		}
 
 		// network not ready
 		if svc.Status.LoadBalancer.Ingress == nil || len(svc.Status.LoadBalancer.Ingress) == 0 {
-			log.Infof("podname:%s ", pod.Name)
-			log.Info("not ready network 返回")
+			log.V(5).Infof("podname:%s ", pod.Name)
+			log.V(5).Info("not ready network 返回")
 			networkStatus.CurrentNetworkState = gamekruiseiov1alpha1.NetworkNotReady
 			pod, err = networkManager.UpdateNetworkStatus(*networkStatus, pod)
 			return pod, cperrors.NewPluginError(cperrors.InternalError, "network not ready, waiting for LoadBalancer Ingress")
@@ -349,18 +342,18 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 
 		// Automatically update LoadBalancerIP to the ingress external IP
 		ingressIP := svc.Status.LoadBalancer.Ingress[0].IP
-		log.Infof("podname:%s ", pod.Name)
-		log.Infof("publicIp: %s internalIp: %s", svc.Status.LoadBalancer.Ingress[0].IP, svc.Status.LoadBalancer.Ingress[1].IP)
-		log.Info(svc.GetAnnotations()[PublicIPSetAnnotationKey])
-		log.Infof("该注解对应服务名：%v", svc.Name)
+		log.V(5).Infof("podname:%s ", pod.Name)
+		log.V(5).Infof("publicIp: %s internalIp: %s", svc.Status.LoadBalancer.Ingress[0].IP, svc.Status.LoadBalancer.Ingress[1].IP)
+		log.V(5).Info(svc.GetAnnotations()[PublicIPSetAnnotationKey])
+		log.V(5).Infof("该注解对应服务名：%v", svc.Name)
 		if svc.GetAnnotations()[PublicIPSetAnnotationKey] != "true" {
-			log.Info("Annotations为false")
+			log.V(5).Info("Annotations为false")
 			if len(svc.Status.LoadBalancer.Ingress) >= 2 {
-				log.Info("Ingress长度等于2")
+				log.V(5).Info("Ingress长度等于2")
 				ingressIP = svc.Status.LoadBalancer.Ingress[1].IP
 				if ingressIP != "" && svc.Spec.LoadBalancerIP != ingressIP {
-					log.Infof("更新LoadBalancerIP为公网IP %s", ingressIP)
-					log.Infof("podname:%s ", pod.Name)
+					log.V(5).Infof("更新LoadBalancerIP为公网IP %s", ingressIP)
+					log.V(5).Infof("podname:%s ", pod.Name)
 					svc.Spec.LoadBalancerIP = ingressIP
 					svc.GetAnnotations()[PublicIPSetAnnotationKey] = "true"
 					err := c.Update(ctx, svc)
@@ -380,8 +373,8 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 		}
 		_, readyCondition := util.GetPodConditionFromList(pod.Status.Conditions, corev1.PodReady)
 		if readyCondition == nil || readyCondition.Status == corev1.ConditionFalse {
-			log.Infof("podname:%s ", pod.Name)
-			log.Info("readyCondition 返回")
+			log.V(5).Infof("podname:%s ", pod.Name)
+			log.V(5).Info("readyCondition 返回")
 			networkStatus.CurrentNetworkState = gamekruiseiov1alpha1.NetworkNotReady
 			pod, err = networkManager.UpdateNetworkStatus(*networkStatus, pod)
 			return pod, cperrors.ToPluginError(err, cperrors.InternalError)
@@ -391,14 +384,12 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 		if util.IsAllowNotReadyContainers(networkManager.GetNetworkConfig()) {
 			toUpDateSvc, err := utils.AllowNotReadyContainers(c, ctx, pod, svc, false)
 			if err != nil {
-				log.Info("err 返回", err)
 				return pod, err
 			}
 
 			if toUpDateSvc {
 				err := c.Update(ctx, svc)
 				if err != nil {
-					log.Info("err 返回", err)
 					return pod, cperrors.ToPluginError(err, cperrors.ApiCallError)
 				}
 			}
@@ -408,7 +399,7 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 		internalAddresses := make([]gamekruiseiov1alpha1.NetworkAddress, 0)
 		externalAddresses := make([]gamekruiseiov1alpha1.NetworkAddress, 0)
 
-		log.Infof("spec.loadbalancerip:%s,ingressip:%s", svc.Spec.LoadBalancerIP, ingressIP)
+		log.V(5).Infof("spec.loadbalancerip:%s,ingressip:%s", svc.Spec.LoadBalancerIP, ingressIP)
 		host := svc.Status.LoadBalancer.Ingress[0].Hostname
 		if host == "" {
 			host = ingressIP
@@ -434,8 +425,8 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 					},
 				},
 			}
-			log.Infof("podname:%s ", pod.Name)
-			log.Info("set endPoints ", endPoints)
+			log.V(5).Infof("podname:%s ", pod.Name)
+			log.V(5).Info("set endPoints ", endPoints)
 			externalAddress := gamekruiseiov1alpha1.NetworkAddress{
 				EndPoint: endPoints,
 				IP:       "",
@@ -454,8 +445,8 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 		networkStatus.InternalAddresses = internalAddresses
 		networkStatus.ExternalAddresses = externalAddresses
 	}
-	log.Infof("podname:%s ", pod.Name)
-	log.Info("测试第二次循环时间，结束")
+	log.V(5).Infof("podname:%s ", pod.Name)
+	log.V(5).Info("测试第二次循环时间，结束")
 	//for _, lbName := range conf.lbNames {
 	//	conditionType := corev1.PodConditionType(PrefixReadyReadinessGate + pod.GetName() + "-" + strings.ToLower(lbName))
 	//
@@ -481,8 +472,8 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 
 	networkStatus.CurrentNetworkState = gamekruiseiov1alpha1.NetworkReady
 	pod, err = networkManager.UpdateNetworkStatus(*networkStatus, pod)
-	log.Infof("podname:%s ", pod.Name)
-	log.Info("finish 返回")
+	log.V(5).Infof("podname:%s ", pod.Name)
+	log.V(5).Info("finish 返回")
 	return pod, cperrors.ToPluginError(err, cperrors.InternalError)
 }
 
@@ -592,8 +583,6 @@ func (m *MultiElbsPlugin) consSvc(podLbsPorts *lbsPorts, conf *multiELBsConfig, 
 	svcAnnotations[ElbMappingPoolAnnotationKey] = lbName
 	svcAnnotations[ElbClassAnnotationKey] = conf.elbClass
 
-	// Create service without LoadBalancerIP initially
-	// It will be set automatically by the cloud provider or in the OnPodUpdated function
 	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        pod.GetName() + "-" + strings.ToLower(lbName),
