@@ -88,10 +88,10 @@ func (m *MultiElbsPlugin) Alias() string {
 func (m *MultiElbsPlugin) Init(c client.Client, options cloudprovider.CloudProviderOptions, ctx context.Context) error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	elbOptions := options.(provideroptions.HwCloudOptions).ELBOptions
-	m.minPort = elbOptions.MinPort
-	m.maxPort = elbOptions.MaxPort
-	m.blockPorts = elbOptions.BlockPorts
+	elbOptions := options.(provideroptions.HwCloudOptions).CCEELBOptions
+	m.minPort = elbOptions.ELBOptions.MinPort
+	m.maxPort = elbOptions.ELBOptions.MaxPort
+	m.blockPorts = elbOptions.ELBOptions.BlockPorts
 
 	svcList := &corev1.ServiceList{}
 	err := c.List(ctx, svcList, client.MatchingLabels{ServiceBelongNetworkTypeKey: MultiElbsNetwork})
