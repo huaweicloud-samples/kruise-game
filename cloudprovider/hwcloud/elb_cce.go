@@ -107,9 +107,9 @@ func (s *CCEElbPlugin) Init(c client.Client, options cloudprovider.CloudProvider
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	elbOptions := options.(provideroptions.HwCloudOptions).CCEELBOptions
-	s.minPort = elbOptions.ELBOptions.MinPort
-	s.maxPort = elbOptions.ELBOptions.MaxPort
-	s.blockPorts = elbOptions.ELBOptions.BlockPorts
+	s.minPort = elbOptions.MinPort
+	s.maxPort = elbOptions.MaxPort
+	s.blockPorts = elbOptions.BlockPorts
 
 	// get all service
 	svcList := &corev1.ServiceList{}
