@@ -475,6 +475,7 @@ func (m *MultiElbsPlugin) consSvc(podLbsPorts *lbsPorts, conf *multiELBsConfig, 
 	//}
 	svcAnnotations[LBIDBelongIndexKey] = strconv.Itoa(podLbsPorts.index)
 	svcAnnotations[ElbMappingPoolAnnotationKey] = lbName
+	svcAnnotations[ElbClassAnnotationKey] = "performance"
 
 	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
