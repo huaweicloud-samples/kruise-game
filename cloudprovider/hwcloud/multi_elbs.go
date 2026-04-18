@@ -64,14 +64,22 @@ const (
 	PublicIPSetAnnotationKey = "game.kruise.io/lb-public-ip-set"
 
 	ElbMappingPoolAnnotationKey = "kubernetes.io/elb.mapping.pool"
+
+	ElbHealthCheckFlagAnnotationKey = "kubernetes.io/elb.health-check-flag"
+	ElbHealthCheckFlagConfigName    = "LBHealthCheckFlag"
+
+	ElbHealthCheckOptionAnnotationKey  = "kubernetes.io/elb.health-check-option"
+	ElbHealthCheckOptionsAnnotationKey = "kubernetes.io/elb.health-check-options"
+	ElbHealthCheckOptionsConfigName    = "LBHealthCheckConfig"
 )
 
 var (
 	notAllowedAnnotationKeyMap = map[string]struct{}{
-		"kubernetes.io/elb.autocreate":   {},
-		"kubernetes.io/elb.mapping.pool": {},
-		"kubernetes.io/elb.class":        {},
-		"kubernetes.io/elb.id":           {},
+		ElbAutocreateAnnotationKey:         {},
+		ElbMappingPoolAnnotationKey:        {},
+		ElbClassAnnotationKey:              {},
+		ElbIdAnnotationKey:                 {},
+		ElbHealthCheckOptionsAnnotationKey: {},
 	}
 )
 
@@ -531,7 +539,8 @@ type multiELBsConfig struct {
 	externalTrafficPolicy corev1.ServiceExternalTrafficPolicyType
 	allocatePolicy        string
 	elbClass              string
-	//*elbHealthConfig
+	lbHealthCheckFlag     string
+	lbHealthCheckConfig   string
 }
 
 func (m *MultiElbsPlugin) consSvc(podLbsPorts *lbsPorts, conf *multiELBsConfig, pod *corev1.Pod, lbName string, c client.Client, ctx context.Context) (*corev1.Service, error) {
@@ -568,30 +577,17 @@ func (m *MultiElbsPlugin) consSvc(podLbsPorts *lbsPorts, conf *multiELBsConfig, 
 		}
 	}
 
-	//loadBalancerClass := "performance"
-
 	svcAnnotations := map[string]string{
-		//SlbListenerOverrideKey:         "true",
-		ElbIdAnnotationKey: selectId,
-		ElbConfigHashKey:   util.GetHash(conf),
-		//LBHealthCheckFlagAnnotationKey: conf.lBHealthCheckFlag,
+		ElbIdAnnotationKey:              selectId,
+		ElbConfigHashKey:                util.GetHash(conf),
+		ElbHealthCheckFlagAnnotationKey: conf.lbHealthCheckFlag,
 	}
-	// 把所有的其他设置的配置都塞进去
 	maps.Copy(svcAnnotations, conf.hwOptions)
 
-	//if conf.lBHealthCheckFlag == "on" {
-	//	svcAnnotations[LBHealthCheckTypeAnnotationKey] = conf.lBHealthCheckType
-	//	svcAnnotations[LBHealthCheckConnectPortAnnotationKey] = conf.lBHealthCheckConnectPort
-	//	svcAnnotations[LBHealthCheckConnectTimeoutAnnotationKey] = conf.lBHealthCheckConnectTimeout
-	//	svcAnnotations[LBHealthCheckIntervalAnnotationKey] = conf.lBHealthCheckInterval
-	//	svcAnnotations[LBHealthyThresholdAnnotationKey] = conf.lBHealthyThreshold
-	//	svcAnnotations[LBUnhealthyThresholdAnnotationKey] = conf.lBUnhealthyThreshold
-	//	if conf.lBHealthCheckType == "http" {
-	//		svcAnnotations[LBHealthCheckDomainAnnotationKey] = conf.lBHealthCheckDomain
-	//		svcAnnotations[LBHealthCheckUriAnnotationKey] = conf.lBHealthCheckUri
-	//		svcAnnotations[LBHealthCheckMethodAnnotationKey] = conf.lBHealthCheckMethod
-	//	}
-	//}
+	if conf.lbHealthCheckFlag == "on" && conf.lbHealthCheckConfig != "" {
+		svcAnnotations[ElbHealthCheckOptionsAnnotationKey] = conf.lbHealthCheckConfig
+	}
+
 	svcAnnotations[LBIDBelongIndexKey] = strconv.Itoa(podLbsPorts.index)
 	svcAnnotations[ElbMappingPoolAnnotationKey] = lbName
 	svcAnnotations[ElbClassAnnotationKey] = conf.elbClass
@@ -617,8 +613,6 @@ func (m *MultiElbsPlugin) consSvc(podLbsPorts *lbsPorts, conf *multiELBsConfig, 
 				SvcSelectorKey: pod.GetName(),
 			},
 			Ports: svcPorts,
-			//LoadBalancerClass: &loadBalancerClass,
-			// LoadBalancerIP will be automatically set by the cloud provider or in OnPodUpdated
 		},
 	}, nil
 }
@@ -747,6 +741,8 @@ func parseMultiELBsConfig(conf []gamekruiseiov1alpha1.NetworkConfParams) (*multi
 	externalTrafficPolicy := corev1.ServiceExternalTrafficPolicyTypeLocal
 	allocatePolicy := "default"
 	elbClass := "performance"
+	elbHealthCheckConfig := ""
+	elbHealthCheckFlag := "on"
 
 	for _, c := range conf {
 		switch c.Name {
@@ -770,7 +766,6 @@ func parseMultiELBsConfig(conf []gamekruiseiov1alpha1.NetworkConfParams) (*multi
 					}
 					nameNums[name]++
 					lbNames[id] = name
-					// IP will be automatically obtained from ingress
 				}
 			}
 		case PortProtocolsConfigName:
@@ -804,6 +799,10 @@ func parseMultiELBsConfig(conf []gamekruiseiov1alpha1.NetworkConfParams) (*multi
 			}
 		case ElbClassConfigName:
 			elbClass = c.Value
+		case ElbHealthCheckFlagConfigName:
+			elbHealthCheckFlag = c.Value
+		case ElbHealthCheckOptionsConfigName:
+			elbHealthCheckConfig = c.Value
 		default:
 			if _, exists := notAllowedAnnotationKeyMap[c.Name]; !exists {
 				hwOptions[c.Name] = c.Value
@@ -830,11 +829,6 @@ func parseMultiELBsConfig(conf []gamekruiseiov1alpha1.NetworkConfParams) (*multi
 		return nil, fmt.Errorf("invalid PortProtocols, which can not be empty")
 	}
 
-	//elbHealthConfig, err := parseelbHealthConfig(conf)
-	//if err != nil {
-	//	return nil, err
-	//}
-
 	return &multiELBsConfig{
 		lbNames:               lbNames,
 		hwOptions:             hwOptions,
@@ -845,6 +839,7 @@ func parseMultiELBsConfig(conf []gamekruiseiov1alpha1.NetworkConfParams) (*multi
 		externalTrafficPolicy: externalTrafficPolicy,
 		allocatePolicy:        allocatePolicy,
 		elbClass:              elbClass,
-		//elbHealthConfig:       elbHealthConfig,
+		lbHealthCheckFlag:     elbHealthCheckFlag,
+		lbHealthCheckConfig:   elbHealthCheckConfig,
 	}, nil
 }
