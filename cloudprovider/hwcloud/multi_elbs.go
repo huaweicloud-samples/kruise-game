@@ -159,13 +159,13 @@ func initMultiLBCache(svcList []corev1.Service, maxPort, minPort int32, blockPor
 		if podAllocate[nsName] == nil {
 			podAllocate[nsName] = &lbsPorts{
 				index:      index,
-				lbIds:      []string{svc.Labels[ElbIdAnnotationKey]},
+				lbIds:      []string{svc.Annotations[ElbIdAnnotationKey]},
 				ports:      ports,
 				protocols:  protocols,
 				targetPort: targetPorts,
 			}
 		} else {
-			podAllocate[nsName].lbIds = append(podAllocate[nsName].lbIds, svc.Labels[ElbIdAnnotationKey])
+			podAllocate[nsName].lbIds = append(podAllocate[nsName].lbIds, svc.Annotations[ElbIdAnnotationKey])
 		}
 	}
 	return podAllocate, cache
