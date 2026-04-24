@@ -266,8 +266,11 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 		} else {
 			// old svc remain
 			if svc.OwnerReferences[0].Kind == "Pod" && svc.OwnerReferences[0].UID != pod.UID {
-				log.Infof("[%s] waiting old svc %s/%s deleted. old owner pod uid is %s, but now is %s", "HwCloud-ELB", svc.Namespace, svc.Name, svc.OwnerReferences[0].UID, pod.UID)
-				return pod, nil
+				log.Warningf("[%s] waiting old svc %s/%s deleted. old owner pod uid is %s, but now is %s. Returning error to trigger controller retry.",
+					"HwCloud-ELB", svc.Namespace, svc.Name, svc.OwnerReferences[0].UID, pod.UID)
+				return pod, cperrors.NewPluginError(cperrors.ApiCallError,
+					fmt.Sprintf("waiting for old service %s/%s to be deleted (old uid %s, new uid %s)",
+						svc.Namespace, svc.Name, svc.OwnerReferences[0].UID, pod.UID))
 			}
 
 			// Check if configuration update is needed
@@ -345,6 +348,7 @@ func (m *MultiElbsPlugin) OnPodUpdated(c client.Client, pod *corev1.Pod, ctx con
 
 		// network not ready
 		if svc.Status.LoadBalancer.Ingress == nil || len(svc.Status.LoadBalancer.Ingress) == 0 {
+			log.Infof("[%s] service %s/%s LB Ingress IP not yet assigned, network remains NotReady for pod %s", MultiElbsNetwork, svc.Namespace, svc.Name, pod.GetName())
 			networkStatus.CurrentNetworkState = gamekruiseiov1alpha1.NetworkNotReady
 			pod, err = networkManager.UpdateNetworkStatus(*networkStatus, pod)
 			return pod, cperrors.ToPluginError(err, cperrors.InternalError)

@@ -212,6 +212,12 @@ func (manager GameServerManager) SyncGsToPod(ctx context.Context, gss *gameKruis
 					telemetryfields.FieldGameServerNamespace, gs.Namespace,
 					telemetryfields.FieldGameServerName, gs.Name)
 				newAnnotations[gameKruiseV1alpha1.GameServerNetworkTriggerTime] = time.Now().Format(TimeFormat)
+			} else if timeSinceOldTrigger > NetworkIntervalTime && timeSinceNetworkTransition >= NetworkTotalWaitTime {
+				manager.logger.Info("network trigger skipped: NetworkTotalWaitTime exceeded, webhook will NOT be re-triggered",
+					telemetryfields.FieldGameServerNamespace, gs.Namespace,
+					telemetryfields.FieldGameServerName, gs.Name,
+					"timeSinceNetworkTransition", timeSinceNetworkTransition.String(),
+					"networkTotalWaitTime", NetworkTotalWaitTime.String())
 			}
 		}
 	}
@@ -485,6 +491,12 @@ func (manager GameServerManager) WaitOrNot() bool {
 			return true
 		} else {
 			manager.eventRecorder.Eventf(manager.gameServer, corev1.EventTypeWarning, GsNetworkStateReason, "Network wait timeout: waited %v, max %v", alreadyWait, NetworkTotalWaitTime)
+			manager.logger.Info("network wait timeout exceeded, giving up re-queue for this GameServer",
+				telemetryfields.FieldGameServerNamespace, manager.gameServer.GetNamespace(),
+				telemetryfields.FieldGameServerName, manager.gameServer.GetName(),
+				telemetryfields.FieldDesired, networkStatus.DesiredNetworkState,
+				telemetryfields.FieldCurrent, networkStatus.CurrentNetworkState,
+				"alreadyWait", alreadyWait.String())
 		}
 	}
 	return false

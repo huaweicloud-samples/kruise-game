@@ -25,6 +25,7 @@ testbin/*
 *.swo
 *~
 .vscode
+.ace-tool/
 .qoder/
 
 # Temporary kustomize overlay for tracing
@@ -48,3 +49,4 @@ log_debug
 
 # Local issue tracking
 问题/
+tmp

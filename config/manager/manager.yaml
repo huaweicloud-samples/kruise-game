@@ -41,13 +41,14 @@ spec:
         - --api-server-qps=5
         - --api-server-qps-burst=10
         - --enable-cert-generation=false
+        - --gameserver-workers=50
         image: controller:latest
         name: manager
         env:
           - name: "NETWORK_TOTAL_WAIT_TIME"
-            value: "60"
+            value: "900"
           - name: "NETWORK_PROBE_INTERVAL_TIME"
-            value: "5"
+            value: "3"
           - name: POD_NAME
             valueFrom:
               fieldRef:
