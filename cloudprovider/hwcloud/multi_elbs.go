@@ -588,6 +588,9 @@ func (m *MultiElbsPlugin) allocate(conf *multiELBsConfig, nsName string) (*lbsPo
 			if len(existingLbs.lbIds) != len(conf.idList[existingLbs.index]) {
 				// Different number of ELBs - needs reallocation
 				needsReallocation = true
+			} else if len(existingLbs.ports) != len(conf.targetPorts) {
+				// Different number of externally exposed ports - needs reallocation
+				needsReallocation = true
 			} else {
 				// Check if all config ELBs exist in current allocation
 				for configLbId := range configLbIdsMap {
@@ -605,6 +608,12 @@ func (m *MultiElbsPlugin) allocate(conf *multiELBsConfig, nsName string) (*lbsPo
 				}
 				delete(m.podAllocate, nsName)
 			} else {
+				// Reuse the existing external ports, but refresh the pod-facing
+				// port/protocol mapping from the latest GSS network config.
+				existingLbs.lbIds = append([]string(nil), conf.idList[existingLbs.index]...)
+				existingLbs.targetPort = append([]int(nil), conf.targetPorts...)
+				existingLbs.protocols = append([]corev1.Protocol(nil), conf.protocols...)
+
 				// Allocation is still valid
 				return m.podAllocate[nsName], nil
 			}

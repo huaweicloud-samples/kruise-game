@@ -121,7 +121,10 @@ func TestAllocateDeAllocate(t *testing.T) {
 		num:    3,
 	}
 
-	lbId, ports := test.elb.allocate(test.lbIds, test.num, test.podKey)
+	lbId, ports, err := test.elb.allocate(test.lbIds, test.num, test.podKey, false)
+	if err != nil {
+		t.Fatalf("allocate failed: %v", err)
+	}
 	if _, exist := test.elb.podAllocate[test.podKey]; !exist {
 		t.Errorf("podAllocate[%s] is empty after allocated", test.podKey)
 	}
