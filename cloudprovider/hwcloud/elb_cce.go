@@ -786,7 +786,7 @@ func convertOptionToAnnotation(options map[string]string, elbId string) (map[str
 	} else {
 		// 使用已有的独占类型的elb的时候, 且提供了kubernetes.io/elb.id, spec.loadbalancerIP来对接ELB
 		// 因为华为CCE在这种场景下, 会让svc的spec.loadBalancerIP为内部ip, 我们希望他为外部ip, 这是使用单个elb id的情况
-		loadbalancerIP := options["kubernetes.io/elb.loadbalancer.ip"]
+		loadbalancerIP = options["kubernetes.io/elb.loadbalancer.ip"]
 		useSpecLoadbalancerIP := options["kubernetes.io/elb.id"] != "" && loadbalancerIP != "" && options["kubernetes.io/elb.class"] == "performance"
 		if useSpecLoadbalancerIP {
 			delete(res, "kubernetes.io/elb.id")
