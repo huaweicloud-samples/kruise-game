@@ -118,7 +118,7 @@ func (m *MultiElbsPlugin) Init(c client.Client, options cloudprovider.CloudProvi
 	if err != nil {
 		return err
 	}
-	m.podAllocate, m.cache = initMultiLBCache(svcList.Items, m.maxPort, m.minPort, m.blockPorts)
+	m.podAllocate, m.cache = initMultiLBCache(svcList.Items, m.minPort, m.maxPort, m.blockPorts)
 
 	log.Infof("[%s] podAllocate cache complete initialization: ", MultiElbsNetwork)
 	for podNsName, lps := range m.podAllocate {
@@ -127,7 +127,7 @@ func (m *MultiElbsPlugin) Init(c client.Client, options cloudprovider.CloudProvi
 	return nil
 }
 
-func initMultiLBCache(svcList []corev1.Service, maxPort, minPort int32, blockPorts []int32) (map[string]*lbsPorts, [][]bool) {
+func initMultiLBCache(svcList []corev1.Service, minPort, maxPort int32, blockPorts []int32) (map[string]*lbsPorts, [][]bool) {
 	podAllocate := make(map[string]*lbsPorts)
 	cache := make([][]bool, 0)
 
@@ -140,6 +140,10 @@ func initMultiLBCache(svcList []corev1.Service, maxPort, minPort int32, blockPor
 		for i := lenCache; i <= index; i++ {
 			cacheLevel := make([]bool, int(maxPort-minPort)+1)
 			for _, p := range blockPorts {
+				if p < minPort || p > maxPort {
+					log.Warningf("[%s] skip out-of-range block port %d for cache [%d, %d]", MultiElbsNetwork, p, minPort, maxPort)
+					continue
+				}
 				cacheLevel[int(p-minPort)] = true
 			}
 			cache = append(cache, cacheLevel)
@@ -149,6 +153,10 @@ func initMultiLBCache(svcList []corev1.Service, maxPort, minPort int32, blockPor
 		protocols := make([]corev1.Protocol, 0)
 		targetPorts := make([]int, 0)
 		for _, port := range svc.Spec.Ports {
+			if port.Port < minPort || port.Port > maxPort {
+				log.Warningf("[%s] skip out-of-range service port %d for svc %s/%s cache [%d, %d]", MultiElbsNetwork, port.Port, svc.Namespace, svc.Name, minPort, maxPort)
+				continue
+			}
 			cache[index][(port.Port - minPort)] = true
 			ports = append(ports, port.Port)
 			protocols = append(protocols, port.Protocol)
