@@ -48,3 +48,5 @@ log_debug
 
 # Local issue tracking
 问题/
+
+tmp/
