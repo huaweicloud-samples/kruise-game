@@ -8,6 +8,7 @@ import (
 	gamekruiseiov1alpha1 "github.com/openkruise/kruise-game/apis/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
 func TestMultiElbsAllocateRefreshesTargetPortsOnConfigChange(t *testing.T) {
@@ -132,5 +133,160 @@ func TestParseMultiElbsConfigReadsHealthCheckOptions(t *testing.T) {
 
 	if conf.lbHealthCheckConfig != `[{"protocol":"tcp","pod_target_port":"TCP:81"}]` {
 		t.Fatalf("expected lbHealthCheckConfig to be preserved, got %s", conf.lbHealthCheckConfig)
+	}
+}
+
+func TestInitMultiLBCacheSkipsOutOfRangeServicePorts(t *testing.T) {
+	svcList := []corev1.Service{
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-pod-0-pool-a",
+				Namespace: "default",
+				Annotations: map[string]string{
+					LBIDBelongIndexKey: "0",
+					ElbIdAnnotationKey: "elb-1",
+				},
+			},
+			Spec: corev1.ServiceSpec{
+				Selector: map[string]string{
+					SvcSelectorKey: "test-pod-0",
+				},
+				Ports: []corev1.ServicePort{
+					{
+						Port:       6001,
+						Protocol:   corev1.ProtocolTCP,
+						TargetPort: intstr.FromInt(80),
+					},
+					{
+						Port:       7001,
+						Protocol:   corev1.ProtocolUDP,
+						TargetPort: intstr.FromInt(81),
+					},
+				},
+			},
+		},
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("initMultiLBCache should skip out-of-range service ports, but panicked: %v", r)
+		}
+	}()
+
+	podAllocate, cache := initMultiLBCache(svcList, 7000, 14000, nil)
+	allocated := podAllocate["default/test-pod-0"]
+	if allocated == nil {
+		t.Fatalf("expected pod allocation for default/test-pod-0")
+	}
+	if len(allocated.ports) != 1 || allocated.ports[0] != 7001 {
+		t.Fatalf("expected only valid port 7001 to be allocated, got %v", allocated.ports)
+	}
+	if len(allocated.protocols) != 1 || allocated.protocols[0] != corev1.ProtocolUDP {
+		t.Fatalf("expected only valid protocol UDP to be preserved, got %v", allocated.protocols)
+	}
+	if len(allocated.targetPort) != 1 || allocated.targetPort[0] != 81 {
+		t.Fatalf("expected only valid target port 81 to be preserved, got %v", allocated.targetPort)
+	}
+	if len(cache) != 1 {
+		t.Fatalf("expected one cache bucket, got %d", len(cache))
+	}
+	if !cache[0][1] {
+		t.Fatalf("expected port 7001 to be marked as allocated")
+	}
+}
+
+func TestInitMultiLBCacheSkipsOutOfRangeBlockPorts(t *testing.T) {
+	svcList := []corev1.Service{
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-pod-0-pool-a",
+				Namespace: "default",
+				Annotations: map[string]string{
+					LBIDBelongIndexKey: "0",
+					ElbIdAnnotationKey: "elb-1",
+				},
+			},
+			Spec: corev1.ServiceSpec{
+				Selector: map[string]string{
+					SvcSelectorKey: "test-pod-0",
+				},
+				Ports: []corev1.ServicePort{
+					{
+						Port:       7003,
+						Protocol:   corev1.ProtocolTCP,
+						TargetPort: intstr.FromInt(80),
+					},
+				},
+			},
+		},
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("initMultiLBCache should skip out-of-range block ports, but panicked: %v", r)
+		}
+	}()
+
+	podAllocate, cache := initMultiLBCache(svcList, 7000, 14000, []int32{6999, 7001, 14001})
+	allocated := podAllocate["default/test-pod-0"]
+	if allocated == nil {
+		t.Fatalf("expected pod allocation for default/test-pod-0")
+	}
+	if len(allocated.ports) != 1 || allocated.ports[0] != 7003 {
+		t.Fatalf("expected valid service port 7003 to remain allocated, got %v", allocated.ports)
+	}
+	if len(cache) != 1 {
+		t.Fatalf("expected one cache bucket, got %d", len(cache))
+	}
+	if !cache[0][1] {
+		t.Fatalf("expected in-range block port 7001 to be marked as blocked")
+	}
+	if !cache[0][3] {
+		t.Fatalf("expected service port 7003 to be marked as allocated")
+	}
+}
+
+func TestInitMultiLBCacheUsesMinMaxParameterOrder(t *testing.T) {
+	svcList := []corev1.Service{
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-pod-0-pool-a",
+				Namespace: "default",
+				Annotations: map[string]string{
+					LBIDBelongIndexKey: "0",
+					ElbIdAnnotationKey: "elb-1",
+				},
+			},
+			Spec: corev1.ServiceSpec{
+				Selector: map[string]string{
+					SvcSelectorKey: "test-pod-0",
+				},
+				Ports: []corev1.ServicePort{
+					{
+						Port:       7002,
+						Protocol:   corev1.ProtocolTCP,
+						TargetPort: intstr.FromInt(80),
+					},
+				},
+			},
+		},
+	}
+
+	podAllocate, cache := initMultiLBCache(svcList, 7000, 14000, []int32{7001})
+	allocated := podAllocate["default/test-pod-0"]
+	if allocated == nil {
+		t.Fatalf("expected pod allocation for default/test-pod-0")
+	}
+	if len(allocated.ports) != 1 || allocated.ports[0] != 7002 {
+		t.Fatalf("expected valid service port 7002 to remain allocated, got %v", allocated.ports)
+	}
+	if len(cache) != 1 {
+		t.Fatalf("expected one cache bucket, got %d", len(cache))
+	}
+	if !cache[0][1] {
+		t.Fatalf("expected block port 7001 to be marked as blocked")
+	}
+	if !cache[0][2] {
+		t.Fatalf("expected service port 7002 to be marked as allocated")
 	}
 }
