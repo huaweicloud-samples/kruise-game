@@ -67,6 +67,8 @@ const (
 	AllocateLoadBalancerNodePortsConfigName = "AllocateLoadBalancerNodePorts"
 
 	ElbPortMappingResultCount = "cce.io/game.kruise.mapping-result-count"
+
+	ServiceProxyName = "service.kubernetes.io/service-proxy-name"
 )
 
 var (
@@ -550,6 +552,7 @@ func (m *MultiElbsPlugin) consSvc(podLbsPorts *lbsPorts, conf *multiELBsConfig, 
 			Annotations: svcAnnotations,
 			Labels: map[string]string{
 				ServiceBelongNetworkTypeKey: MultiElbsNetwork,
+				ServiceProxyName:            "dummy",
 			},
 			OwnerReferences: getSvcOwnerReference(c, ctx, pod, conf.isFixed),
 		},
