@@ -195,6 +195,69 @@ func TestInitMultiLBCacheSkipsOutOfRangeServicePorts(t *testing.T) {
 	}
 }
 
+func TestInitMultiLBCacheMergesTCPUDPServicePorts(t *testing.T) {
+	svcList := []corev1.Service{
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-pod-0-pool-a",
+				Namespace: "default",
+				Annotations: map[string]string{
+					LBIDBelongIndexKey: "0",
+					ElbIdAnnotationKey: "elb-1",
+				},
+			},
+			Spec: corev1.ServiceSpec{
+				Selector: map[string]string{
+					SvcSelectorKey: "test-pod-0",
+				},
+				Ports: []corev1.ServicePort{
+					{
+						Port:       6076,
+						Protocol:   corev1.ProtocolTCP,
+						TargetPort: intstr.FromInt(8601),
+					},
+					{
+						Port:       6076,
+						Protocol:   corev1.ProtocolUDP,
+						TargetPort: intstr.FromInt(8601),
+					},
+					{
+						Port:       6077,
+						Protocol:   corev1.ProtocolTCP,
+						TargetPort: intstr.FromInt(8661),
+					},
+					{
+						Port:       6077,
+						Protocol:   corev1.ProtocolUDP,
+						TargetPort: intstr.FromInt(8661),
+					},
+				},
+			},
+		},
+	}
+
+	podAllocate, cache := initMultiLBCache(svcList, 6000, 7000, nil)
+	allocated := podAllocate["default/test-pod-0"]
+	if allocated == nil {
+		t.Fatalf("expected pod allocation for default/test-pod-0")
+	}
+	if len(allocated.ports) != 2 || allocated.ports[0] != 6076 || allocated.ports[1] != 6077 {
+		t.Fatalf("expected TCPUDP service ports to merge into [6076 6077], got %v", allocated.ports)
+	}
+	if len(allocated.protocols) != 2 || allocated.protocols[0] != ProtocolTCPUDP || allocated.protocols[1] != ProtocolTCPUDP {
+		t.Fatalf("expected merged protocols to be [TCPUDP TCPUDP], got %v", allocated.protocols)
+	}
+	if len(allocated.targetPort) != 2 || allocated.targetPort[0] != 8601 || allocated.targetPort[1] != 8661 {
+		t.Fatalf("expected merged target ports to be [8601 8661], got %v", allocated.targetPort)
+	}
+	if !cache[0][76] {
+		t.Fatalf("expected service port 6076 to be marked as allocated")
+	}
+	if !cache[0][77] {
+		t.Fatalf("expected service port 6077 to be marked as allocated")
+	}
+}
+
 func TestInitMultiLBCacheSkipsOutOfRangeBlockPorts(t *testing.T) {
 	svcList := []corev1.Service{
 		{
