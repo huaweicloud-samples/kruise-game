@@ -99,6 +99,11 @@ type lbsPorts struct {
 	protocols  []corev1.Protocol
 }
 
+type recoveredServicePortKey struct {
+	port       int32
+	targetPort int
+}
+
 func (m *MultiElbsPlugin) Name() string {
 	return MultiElbsNetwork
 }
@@ -154,12 +159,24 @@ func initMultiLBCache(svcList []corev1.Service, minPort, maxPort int32, blockPor
 		ports := make([]int32, 0)
 		protocols := make([]corev1.Protocol, 0)
 		targetPorts := make([]int, 0)
+		portIndexes := make(map[recoveredServicePortKey]int)
 		for _, port := range svc.Spec.Ports {
 			if port.Port < minPort || port.Port > maxPort {
 				log.Warningf("[%s] skip out-of-range service port %d for svc %s/%s cache [%d, %d]", MultiElbsNetwork, port.Port, svc.Namespace, svc.Name, minPort, maxPort)
 				continue
 			}
 			cache[index][(port.Port - minPort)] = true
+			key := recoveredServicePortKey{
+				port:       port.Port,
+				targetPort: port.TargetPort.IntValue(),
+			}
+			if portIndex, ok := portIndexes[key]; ok {
+				if isTCPUDPProtocolPair(protocols[portIndex], port.Protocol) {
+					protocols[portIndex] = ProtocolTCPUDP
+				}
+				continue
+			}
+			portIndexes[key] = len(ports)
 			ports = append(ports, port.Port)
 			protocols = append(protocols, port.Protocol)
 			targetPorts = append(targetPorts, port.TargetPort.IntValue())
@@ -179,6 +196,12 @@ func initMultiLBCache(svcList []corev1.Service, minPort, maxPort int32, blockPor
 		}
 	}
 	return podAllocate, cache
+}
+
+func isTCPUDPProtocolPair(existing, incoming corev1.Protocol) bool {
+	return (existing == corev1.ProtocolTCP && incoming == corev1.ProtocolUDP) ||
+		(existing == corev1.ProtocolUDP && incoming == corev1.ProtocolTCP) ||
+		(existing == ProtocolTCPUDP && (incoming == corev1.ProtocolTCP || incoming == corev1.ProtocolUDP))
 }
 
 func (m *MultiElbsPlugin) OnPodAdded(c client.Client, pod *corev1.Pod, ctx context.Context) (*corev1.Pod, cperrors.PluginError) {
@@ -629,10 +652,14 @@ func (m *MultiElbsPlugin) allocate(conf *multiELBsConfig, nsName string) (*lbsPo
 				return m.podAllocate[nsName], nil
 			}
 		} else {
-			// Index out of bounds for new configuration - reallocate
-			// Deallocate current allocation
-			for _, port := range existingLbs.ports {
-				m.cache[existingLbs.index][port-m.minPort] = false
+			// Index out of bounds for new configuration - reallocate.
+			// The cache level for this stale index may already have been
+			// truncated by a prior allocate call (see cache resize below),
+			// so guard the deallocation against an out-of-range index.
+			if existingLbs.index < len(m.cache) {
+				for _, port := range existingLbs.ports {
+					m.cache[existingLbs.index][port-m.minPort] = false
+				}
 			}
 			delete(m.podAllocate, nsName)
 		}
