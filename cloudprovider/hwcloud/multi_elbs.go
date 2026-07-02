@@ -652,10 +652,14 @@ func (m *MultiElbsPlugin) allocate(conf *multiELBsConfig, nsName string) (*lbsPo
 				return m.podAllocate[nsName], nil
 			}
 		} else {
-			// Index out of bounds for new configuration - reallocate
-			// Deallocate current allocation
-			for _, port := range existingLbs.ports {
-				m.cache[existingLbs.index][port-m.minPort] = false
+			// Index out of bounds for new configuration - reallocate.
+			// The cache level for this stale index may already have been
+			// truncated by a prior allocate call (see cache resize below),
+			// so guard the deallocation against an out-of-range index.
+			if existingLbs.index < len(m.cache) {
+				for _, port := range existingLbs.ports {
+					m.cache[existingLbs.index][port-m.minPort] = false
+				}
 			}
 			delete(m.podAllocate, nsName)
 		}

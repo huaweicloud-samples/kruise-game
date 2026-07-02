@@ -353,3 +353,72 @@ func TestInitMultiLBCacheUsesMinMaxParameterOrder(t *testing.T) {
 		t.Fatalf("expected service port 7002 to be marked as allocated")
 	}
 }
+
+// Regression: when ElbIdNames shrinks (an ELB group is removed), conf.idList
+// becomes shorter than the index some already-running pods still sit on. A
+// fresh allocate (new pod) truncates m.cache to len(conf.idList) first; the
+// stale high-index pod must then reallocate without panicking on
+// m.cache[existingLbs.index] being out of range.
+func TestMultiElbsAllocateShrunkIdListDoesNotPanic(t *testing.T) {
+	level := func() []bool { return make([]bool, 1000) } // ports [6000,6999]
+	plugin := &MultiElbsPlugin{
+		minPort: 6000,
+		maxPort: 6999,
+		cache: [][]bool{
+			level(), // index 0
+			level(), // index 1
+			level(), // index 2 (removed from config but pod still here)
+		},
+		podAllocate: map[string]*lbsPorts{
+			"default/test-pod-b": {
+				index:      2,
+				lbIds:      []string{"elb-x"},
+				ports:      []int32{6076},
+				targetPort: []int{80},
+				protocols:  []corev1.Protocol{corev1.ProtocolTCP},
+			},
+		},
+	}
+
+	// conf shrank to a single ELB group
+	conf := &multiELBsConfig{
+		lbNames:        map[string]string{"elb-1": "pool-a"},
+		idList:         [][]string{{"elb-1"}},
+		targetPorts:    []int{80},
+		protocols:      []corev1.Protocol{corev1.ProtocolTCP},
+		allocatePolicy: "default",
+	}
+
+	// 1) new pod reconciles first -> fresh allocate truncates cache 3 -> 1
+	if _, err := plugin.allocate(conf, "default/test-pod-c"); err != nil {
+		t.Fatalf("allocate for new pod c returned error: %v", err)
+	}
+	if len(plugin.cache) != 1 {
+		t.Fatalf("expected cache truncated to 1 level, got %d", len(plugin.cache))
+	}
+
+	// 2) stale high-index pod reconciles -> must not panic, must reallocate
+	var allocated *lbsPorts
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("allocate panicked on shrunk-config pod b: %v", r)
+			}
+		}()
+		var err error
+		allocated, err = plugin.allocate(conf, "default/test-pod-b")
+		if err != nil {
+			t.Fatalf("allocate for stale pod b returned error: %v", err)
+		}
+	}()
+
+	if allocated.index != 0 {
+		t.Fatalf("expected stale pod reallocated to index 0, got %d", allocated.index)
+	}
+	if len(allocated.ports) != 1 {
+		t.Fatalf("expected 1 port reallocated, got %v", allocated.ports)
+	}
+	if plugin.podAllocate["default/test-pod-b"] == nil || plugin.podAllocate["default/test-pod-b"].index != 0 {
+		t.Fatalf("expected stale pod migrated to index 0 in podAllocate")
+	}
+}
